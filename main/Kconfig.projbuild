@@ -1,0 +1,39 @@
+menu "TinySkyBoard"
+
+    comment "Initial values only: after the first boot everything is set on the setup page."
+
+    config TINYSKY_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Leave empty to start in setup mode (the panel creates the "TinySkyBoard"
+            Wi-Fi and serves the setup page at http://192.168.4.1).
+
+    config TINYSKY_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            Stored in plain text in sdkconfig and in the compiled firmware.
+            Prefer the setup page, which keeps it only on the board.
+
+    config TINYSKY_CITY
+        string "City name (shown on the screen)"
+        default "London"
+
+    config TINYSKY_LAT
+        string "Latitude"
+        default "51.5074"
+
+    config TINYSKY_LON
+        string "Longitude"
+        default "-0.1278"
+
+    config TINYSKY_TZ
+        string "Time zone (POSIX TZ) until the first weather update"
+        default "GMT0BST,M3.5.0/1,M10.5.0"
+        help
+            Only used until the first weather download; after that the panel takes
+            the time zone from the city automatically.
+            Examples: "CET-1CEST,M3.5.0,M10.5.0/3" (Berlin), "<-03>3" (Sao Paulo).
+
+endmenu
