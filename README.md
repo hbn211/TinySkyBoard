@@ -11,7 +11,9 @@ no reflashing when you move or change networks.
 **Version 1.0.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
-<!-- TODO: add a photo of the panel running: docs/images/panel.jpg -->
+![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
+
+*Landscape layout, with the interface in Portuguese (English is the default).*
 
 | Setup page | Built-in help |
 |---|---|
