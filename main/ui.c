@@ -21,11 +21,14 @@ LV_FONT_DECLARE(font_pt_14);
 LV_FONT_DECLARE(font_pt_20);
 LV_FONT_DECLARE(font_pt_28);
 
-#define DASH_SHOW_S    10   // cycle: dashboard 10 s, then each active message 6 s
-#define MSG_SHOW_S     6
+// cycle: dashboard, each sensor page, each active message (seconds, from the setup page)
+static int s_dash_s = CYCLE_DEFAULT_S;
+static int s_sens_s = CYCLE_DEFAULT_S;
+static int s_msg_s = CYCLE_DEFAULT_S;
 #define MSG_NEW_S      20   // a new message stays longer the first time
 #define BROWSE_S       10   // browse mode (button) without a click goes back to normal
 #define DELETED_MS     1200 // how long the "deleted" notice shows
+#define SENS_PER_PAGE  2
 
 // message text area: 36 px title on top, 22 px footer at the bottom
 #define MSG_TOP        36
@@ -64,7 +67,7 @@ static uint32_t s_toast_tick;
 static msg_item_t s_items[MSG_ITEMS_MAX];   // active messages, newest first
 static int s_n;
 static int s_idx = -1;      // item on screen; -1 = dashboard
-static int s_left = DASH_SHOW_S;   // seconds until the next switch
+static int s_left = CYCLE_DEFAULT_S;   // seconds until the next switch
 static bool s_browse;       // browsing with the button
 static int s_browse_left;
 static bool s_deleting;     // showing the "deleted" notice
@@ -73,6 +76,11 @@ static bool s_lan;          // setup page open on the home network
 static char s_lan_url[48];
 static lv_obj_t *s_lan_panel;
 static lv_obj_t *s_lan_msg;
+static lv_obj_t *s_sens_panel;   // Govee sensors, between the dashboard and the messages
+static int s_sens = -1;          // sensor page on screen; -1 = none
+static govee_sensor_t s_govee[GOVEE_MAX];
+static int s_ng;
+static uint32_t s_govee_ver;
 
 typedef struct {
     const char *text;
@@ -326,18 +334,26 @@ static void show(int idx)
         return;
     }
     bool was_visible = !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
+    bool sens_visible = s_sens >= 0;
     s_card = false;
     s_idx = idx;
+    s_sens = -1;
     if (idx < 0) {
         if (was_visible) {
             lv_obj_fade_out(s_msg_panel, 300, 0);
         }
+        if (sens_visible) {
+            lv_obj_fade_out(s_sens_panel, 300, 0);
+        }
         lv_obj_add_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    if (sens_visible) {
+        lv_obj_add_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
+    }
     render_message();
     lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
-    if (was_visible) {
+    if (was_visible || sens_visible) {
         lv_obj_set_style_opa(s_msg_panel, LV_OPA_COVER, 0);
     } else {
         lv_obj_fade_in(s_msg_panel, 300, 0);
@@ -362,8 +378,13 @@ static void browse_show(int idx)
 static void show_card(void)
 {
     bool was_visible = s_msg_panel && !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
+    if (s_sens >= 0) {
+        lv_obj_add_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
+        was_visible = true;   // no fade: something already covers the dashboard
+    }
     s_idx = -1;
     s_card = true;
+    s_sens = -1;
     if (!s_msg_panel) {
         return;
     }
@@ -376,10 +397,160 @@ static void show_card(void)
     }
 }
 
+static int sens_pages(void)
+{
+    return (s_ng + SENS_PER_PAGE - 1) / SENS_PER_PAGE;
+}
+
+// "09:15" today, "15/10 09:15" on another day
+static void fmt_time(char *out, size_t size, time_t t)
+{
+    struct tm tm, today;
+    time_t now = time(NULL);
+    localtime_r(&t, &tm);
+    localtime_r(&now, &today);
+    if (tm.tm_yday == today.tm_yday && tm.tm_year == today.tm_year) {
+        snprintf(out, size, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    } else {
+        snprintf(out, size, "%02d/%02d %02d:%02d", tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
+    }
+}
+
+/*
+ * One card per sensor, two per page. Portrait: one above the other; landscape: side by side.
+ * +----------------------+
+ * | Living room          |
+ * | 22.9°C  ^            |   ^ v -  trend over the last hour
+ * | min 21.3° max 24.1°  |
+ * | 61% hum              |
+ * | updated 09:15        |
+ * +----------------------+
+ */
+static void render_sensors(void)
+{
+    if (!s_sens_panel || s_sens < 0) {
+        return;
+    }
+    lv_obj_clean(s_sens_panel);
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    bool landscape = w > h;
+
+    lv_obj_t *title = label(s_sens_panel, &font_pt_14, COLOR_ACCENT);
+    if (sens_pages() > 1) {
+        lv_label_set_text_fmt(title, LV_SYMBOL_HOME "  %s  %d/%d", T->sens_title, s_sens + 1, sens_pages());
+    } else {
+        lv_label_set_text_fmt(title, LV_SYMBOL_HOME "  %s", T->sens_title);
+    }
+    lv_obj_set_pos(title, 10, 8);
+    lv_obj_t *bar = lv_obj_create(s_sens_panel);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, w - 20, 2);
+    lv_obj_set_pos(bar, 10, 30);
+    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
+
+    int avail = h - MSG_TOP - 6;
+    int on_page = s_ng - s_sens * SENS_PER_PAGE;
+    on_page = on_page > SENS_PER_PAGE ? SENS_PER_PAGE : on_page;
+    bool single = on_page == 1;   // alone on the page: one big card on the whole screen
+    int cw = landscape && !single ? (w - 18) / 2 : w - 12;
+    int ch = landscape || single ? avail : (avail - 6) / 2;
+    char unit = s_fahrenheit ? 'F' : 'C';
+    for (int k = 0; k < on_page; k++) {
+        const govee_sensor_t *g = &s_govee[s_sens * SENS_PER_PAGE + k];
+        lv_obj_t *c = card(s_sens_panel, landscape ? 6 + k * (cw + 6) : 6, landscape ? MSG_TOP : MSG_TOP + k * (ch + 6),
+                           cw, ch);
+        // long names roll instead of wrapping under the temperature
+        lv_obj_t *name = label(c, &font_pt_14, lv_color_white());
+        lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        lv_obj_set_width(name, cw - 16);
+        lv_label_set_text(name, g->name);
+
+        lv_obj_t *foot = label(c, &font_pt_12, COLOR_MUTED);
+        lv_obj_align(foot, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        if (g->changed_at) {
+            char when[40];
+            fmt_time(when, sizeof(when), g->changed_at);
+            lv_label_set_text_fmt(foot, T->sens_updated_fmt, when);
+        } else {
+            lv_label_set_text(foot, T->sens_wait);   // a reading, but no upload seen yet
+        }
+
+        // single: 48 px temperature; portrait stacks everything, landscape puts humidity on the right
+        int y_temp = single ? (landscape ? 20 : 44) : 18;
+        int y_range = single ? (landscape ? 76 : 108) : 52;
+        lv_obj_t *temp = label(c, single ? &lv_font_montserrat_48 : &font_pt_28, lv_color_white());
+        lv_label_set_text_fmt(temp, "%.1f" DEG "%c", temp_unit(g->temp_c), unit);
+        lv_obj_set_pos(temp, 0, y_temp);
+        if (g->has_trend) {
+            lv_obj_t *arrow = label(c, single ? &font_pt_28 : &font_pt_20, g->trend > 0 ? lv_color_hex(0xff8a65) :
+                                                                         g->trend < 0 ? COLOR_ACCENT : COLOR_MUTED);
+            lv_label_set_text(arrow, g->trend > 0 ? LV_SYMBOL_UP : g->trend < 0 ? LV_SYMBOL_DOWN : LV_SYMBOL_MINUS);
+            lv_obj_update_layout(temp);
+            lv_obj_align_to(arrow, temp, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+        }
+
+        lv_obj_t *range = label(c, single ? &font_pt_14 : &font_pt_12, COLOR_MUTED);
+        lv_label_set_text_fmt(range, T->sens_minmax_fmt, temp_unit(g->day_min), temp_unit(g->day_max));
+        lv_obj_set_pos(range, 0, y_range);
+
+        if (g->humidity >= 0) {
+            lv_obj_t *hum = label(c, single ? &font_pt_20 : &font_pt_14, lv_color_white());
+            lv_label_set_text_fmt(hum, T->sens_hum_fmt, g->humidity);
+            if (single && landscape) {
+                lv_obj_align(hum, LV_ALIGN_TOP_RIGHT, 0, 34);
+            } else {
+                lv_obj_set_pos(hum, 0, single ? 136 : 70);
+            }
+        }
+    }
+}
+
+static void show_sensors(int page)
+{
+    bool covered = (s_msg_panel && !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card)) ||
+                   s_sens >= 0;
+    s_idx = -1;
+    s_card = false;
+    s_sens = page;
+    if (!s_sens_panel) {
+        return;
+    }
+    if (s_msg_panel) {
+        lv_obj_add_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+    render_sensors();
+    lv_obj_remove_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
+    if (covered) {
+        lv_obj_set_style_opa(s_sens_panel, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_fade_in(s_sens_panel, 300, 0);
+    }
+}
+
+static void build_sensor_panel(int w, int h)
+{
+    s_sens_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_sens_panel);
+    lv_obj_set_size(s_sens_panel, w, h);
+    lv_obj_set_style_bg_color(s_sens_panel, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_sens_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_sens_panel, LV_OBJ_FLAG_SCROLLABLE);
+    if (s_sens >= sens_pages()) {
+        s_sens = -1;
+    }
+    if (s_sens >= 0) {
+        render_sensors();
+    } else {
+        lv_obj_add_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void exit_browse(void)
 {
     s_browse = false;
-    s_left = DASH_SHOW_S;
+    s_left = s_dash_s;
     show(-1);
 }
 
@@ -447,7 +618,7 @@ static void build_message_panel(int w, int h)
     }
 }
 
-// Normal cycle: dashboard DASH_SHOW_S, then each active message MSG_SHOW_S
+// Normal cycle: dashboard, sensor pages, then each active message
 static void message_cycle(void)
 {
     if (!s_msg_panel || s_deleting) {
@@ -459,8 +630,9 @@ static void message_cycle(void)
         }
         return;
     }
-    if (s_n == 0) {
-        if (s_idx >= 0) {
+    int pages = sens_pages();
+    if (s_n == 0 && pages == 0) {
+        if (s_idx >= 0 || s_sens >= 0) {
             show(-1);
         }
         return;
@@ -468,11 +640,18 @@ static void message_cycle(void)
     if (--s_left > 0) {
         return;
     }
-    if (s_idx + 1 < s_n) {
-        s_left = MSG_SHOW_S;
-        show(s_idx + 1);
+    // order: dashboard, sensor pages, messages, dashboard
+    if (s_sens >= 0 ? s_sens + 1 < pages : (s_idx < 0 && pages > 0)) {
+        s_left = s_sens_s;
+        show_sensors(s_sens + 1);
+        return;
+    }
+    int next = s_sens >= 0 ? 0 : s_idx + 1;
+    if (next < s_n) {
+        s_left = s_msg_s;
+        show(next);
     } else {
-        s_left = DASH_SHOW_S;
+        s_left = s_dash_s;
         show(-1);
     }
 }
@@ -480,6 +659,16 @@ static void message_cycle(void)
 // New or deleted message, or a schedule that started/ended
 static void poll_cb(lv_timer_t *t)
 {
+    uint32_t ver = govee_version();
+    if (ver != s_govee_ver && !s_config_mode) {
+        s_govee_ver = ver;
+        s_ng = govee_get(s_govee, GOVEE_MAX, false);
+        if (s_sens >= sens_pages()) {
+            show(-1);
+        } else {
+            render_sensors();
+        }
+    }
     uint32_t ev = msg_take_events();
     if (!ev || s_config_mode) {
         return;
@@ -500,7 +689,7 @@ static void poll_cb(lv_timer_t *t)
             browse_show(s_n - 1);
         } else {
             s_browse = false;
-            s_left = DASH_SHOW_S;
+            s_left = s_dash_s;
             show(-1);
         }
     } else if (s_idx >= 0) {
@@ -708,6 +897,7 @@ static void build(void)
     lv_obj_clean(scr);
     lv_obj_clean(lv_layer_top());
     s_msg_panel = NULL;
+    s_sens_panel = NULL;
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
 
@@ -763,6 +953,7 @@ static void build(void)
     render_current();
     render_forecast();
     build_message_panel(w, h);
+    build_sensor_panel(w, h);
     s_lan_panel = NULL;   // lv_layer_top was cleaned above
     s_lan_msg = NULL;
     if (s_lan) {
@@ -774,6 +965,10 @@ static void build(void)
 void ui_init(bool config_mode)
 {
     s_config_mode = config_mode;
+    s_dash_s = config_get_u8_def("t_dash", CYCLE_DEFAULT_S);
+    s_sens_s = config_get_u8_def("t_sens", CYCLE_DEFAULT_S);
+    s_msg_s = config_get_u8_def("t_msg", CYCLE_DEFAULT_S);
+    s_left = s_dash_s;
     strlcpy(s_status_text, T->starting, sizeof(s_status_text));
     build();
     lv_timer_create(tick_cb, 1000, NULL);
@@ -834,6 +1029,7 @@ void ui_set_fahrenheit(bool on)
     ui_toast(msg);
     render_current();
     render_forecast();
+    render_sensors();
 }
 
 // ---------- setup page on the home network ----------
@@ -909,7 +1105,7 @@ void ui_lan_setup_close(void)
         lv_obj_delete(s_lan_panel);
         s_lan_panel = NULL;
     }
-    s_left = DASH_SHOW_S;
+    s_left = s_dash_s;
 }
 
 bool ui_lan_setup_active(void)

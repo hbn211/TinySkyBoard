@@ -51,6 +51,7 @@ void config_load(void)
     }
     get_str(nvs, "tg_token", g_cfg.tg_token, sizeof(g_cfg.tg_token));
     nvs_get_i64(nvs, "tg_owner", &g_cfg.tg_owner);
+    get_str(nvs, "govee_key", g_cfg.govee_key, sizeof(g_cfg.govee_key));
     nvs_close(nvs);
 }
 
@@ -68,6 +69,7 @@ void config_save(void)
     nvs_set_str(nvs, "tz", g_cfg.tz);
     nvs_set_str(nvs, "tg_token", g_cfg.tg_token);
     nvs_set_i64(nvs, "tg_owner", g_cfg.tg_owner);
+    nvs_set_str(nvs, "govee_key", g_cfg.govee_key);
     nvs_commit(nvs);
     nvs_close(nvs);
 }

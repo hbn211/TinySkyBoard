@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0 — 2026-10-16
+
+- **Govee Wi-Fi thermometers** through the Govee OpenAPI: temperature, humidity, today's low and
+  high, and the trend over the last hour. One sensor fills the screen, two share it. Polling
+  follows each sensor's uploads, "updated" shows when the reading changed, and a sensor that
+  stops reporting leaves the screen. API key and upload interval on the setup page.
+- `/status` lists the Govee sensors, including the ones that stopped reporting.
+- Screen rotation times (clock, sensor pages, messages) on the setup page; 5 s by default
+  (was 10 s for the clock and 6 s per message).
+- The LED blinks white until new messages are opened with the button; its brightness is a
+  separate setting (0% = no blink). Unread messages have an orange header.
+- **Set up over Wi-Fi** card after the last message: hold 2 s to open the setup page on the home
+  network, with a QR code to its address. Closes with a click or after 10 minutes.
+- `tools/govee_probe.py` to check the Govee API from a computer.
+
 ## 1.0.0 — 2026-10-14
 
 First public release.

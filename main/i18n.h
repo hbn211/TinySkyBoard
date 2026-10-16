@@ -50,6 +50,11 @@ typedef struct {
     const char *no_wifi_portal;
     const char *finding_city;
     const char *city_not_found_fmt; // %s = city
+    const char *sens_title;         // Govee sensors screen
+    const char *sens_updated_fmt;   // %s = time of the last new reading
+    const char *sens_wait;
+    const char *sens_minmax_fmt;    // %.1f min, %.1f max (no unit)
+    const char *sens_hum_fmt;       // %.0f humidity
 
     // setup page
     const char *p_title;
@@ -64,6 +69,10 @@ typedef struct {
     const char *p_tg;
     const char *p_tg_set;
     const char *p_tg_hint;
+    const char *p_govee;
+    const char *p_govee_hint;
+    const char *p_govee_int;
+    const char *p_govee_int_hint;
     const char *p_save;
     const char *p_required;
     const char *p_saved_title;
@@ -75,6 +84,10 @@ typedef struct {
     const char *p_bright_led_night;
     const char *p_bright_alert;
     const char *p_bright_hint;
+    const char *p_t_dash;
+    const char *p_t_sens;
+    const char *p_t_msg;
+    const char *p_t_hint;
     const char *p_rotation;
     const char *p_rotation_hint;
     const char *p_usb[4];         // USB at the bottom, left, top, right
@@ -127,6 +140,7 @@ typedef struct {
     const char *st_weather;
     const char *st_no_weather;
     const char *st_memory;
+    const char *st_sens_gone;       // sensor without new readings, off the screen
 } i18n_t;
 
 extern const i18n_t *T;     // active language

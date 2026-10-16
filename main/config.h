@@ -12,7 +12,8 @@ typedef struct {
     char lon[16];
     char tz[48];    // POSIX TZ; updated automatically from the offset Open-Meteo returns
     char tg_token[80];  // Telegram bot token; empty = disabled
-    int64_t tg_owner;   // owner's chat_id; 0 = the first chat to talk to the bot becomes the owner
+    int64_t tg_owner;
+    char govee_key[48];  // Govee OpenAPI key; empty = no sensors   // owner's chat_id; 0 = the first chat to talk to the bot becomes the owner
 } config_t;
 
 extern config_t g_cfg;

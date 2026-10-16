@@ -111,6 +111,12 @@ static esp_err_t http_event(esp_http_client_event_t *e)
 
 cJSON *net_http_json(const char *url, const char *post_body, int timeout_ms)
 {
+    return net_http_json_hdr(url, post_body, NULL, NULL, timeout_ms);
+}
+
+cJSON *net_http_json_hdr(const char *url, const char *post_body, const char *hdr, const char *hdr_value,
+                         int timeout_ms)
+{
     resp_t resp = {.buf = calloc(1, RESP_MAX)};
     if (!resp.buf) {
         return NULL;
@@ -123,6 +129,9 @@ cJSON *net_http_json(const char *url, const char *post_body, int timeout_ms)
         .timeout_ms = timeout_ms,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (hdr) {
+        esp_http_client_set_header(client, hdr, hdr_value);
+    }
     if (post_body) {
         esp_http_client_set_method(client, HTTP_METHOD_POST);
         esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -333,6 +342,9 @@ static void net_task(void *arg)
     msg_init();
     if (g_cfg.tg_token[0]) {
         telegram_start();
+    }
+    if (g_cfg.govee_key[0]) {
+        govee_start();
     }
 
     while (true) {

@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -466,9 +467,23 @@ static void announce_boot(void)
     reply(g_cfg.tg_owner, out);
 }
 
+// snprintf at out[*n] that never runs past the buffer (the text is cut instead)
+static void append(char *out, size_t size, int *n, const char *fmt, ...)
+{
+    if (*n >= (int)size - 1) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(out + *n, size - *n, fmt, ap);
+    va_end(ap);
+    *n = r < 0 ? *n : *n + r >= (int)size ? (int)size - 1 : *n + r;
+}
+
 static void send_status(int64_t chat_id)
 {
-    char out[320], span[24];
+    static char out[1024];   // up to GOVEE_MAX sensor lines; only the bot task calls this
+    char span[24];
     fmt_span(uptime_s(), span, sizeof(span));
     int n = snprintf(out, sizeof(out), "\xE2\x9C\x85 %s\n%s %s\n", T->st_online, T->st_uptime, span);
 
@@ -489,11 +504,37 @@ static void send_status(int64_t chat_id)
     } else {
         n += snprintf(out + n, sizeof(out) - n, "%s: %s\n", T->st_weather, T->st_no_weather);
     }
-    snprintf(out + n, sizeof(out) - n, "%s: %u KB\nTinySkyBoard v%s", T->st_memory,
-             (unsigned)(esp_get_free_heap_size() / 1024), esp_app_get_description()->version);
+    static govee_sensor_t sens[GOVEE_MAX];
+    int ns = govee_get(sens, GOVEE_MAX, true);
+    bool f = config_get_u8("fahr");
+    float k = f ? 9.0f / 5.0f : 1.0f, off = f ? 32.0f : 0.0f;
+    for (int i = 0; i < ns; i++) {
+        const govee_sensor_t *g = &sens[i];
+        const char *arrow = !g->has_trend ? "" : g->trend > 0 ? " \xE2\x86\x91" : g->trend < 0 ? " \xE2\x86\x93" : " \xE2\x86\x92";
+        append(out, sizeof(out), &n, "\xF0\x9F\x8C\xA1 %s: %.1f\xC2\xB0%c%s", g->name, g->temp_c * k + off,
+               f ? 'F' : 'C', arrow);
+        if (g->humidity >= 0) {
+            append(out, sizeof(out), &n, ", %.0f%%", g->humidity);
+        }
+        append(out, sizeof(out), &n, "\n    ");
+        append(out, sizeof(out), &n, T->sens_minmax_fmt, g->day_min * k + off, g->day_max * k + off);
+        if (g->changed_at) {
+            struct tm tm;
+            localtime_r(&g->changed_at, &tm);
+            char when[8];
+            snprintf(when, sizeof(when), "%02d:%02d", tm.tm_hour % 24, tm.tm_min % 60);
+            append(out, sizeof(out), &n, " \xC2\xB7 ");
+            append(out, sizeof(out), &n, T->sens_updated_fmt, when);
+        }
+        if (!g->shown) {
+            append(out, sizeof(out), &n, "\n    \xE2\x9A\xA0 %s", T->st_sens_gone);
+        }
+        append(out, sizeof(out), &n, "\n");
+    }
+    append(out, sizeof(out), &n, "%s: %u KB\nTinySkyBoard v%s", T->st_memory,
+           (unsigned)(esp_get_free_heap_size() / 1024), esp_app_get_description()->version);
     reply(chat_id, out);
 }
-
 // Cleans the text and checks it fits the screen (in any rotation) and the byte limit.
 // Replies to the user and returns false if it can't be shown.
 static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t out_size)

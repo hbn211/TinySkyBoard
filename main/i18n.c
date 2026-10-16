@@ -39,6 +39,11 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .no_wifi_portal = "Sem Wi-Fi: abrindo config",
         .finding_city = "Buscando cidade...",
         .city_not_found_fmt = "Cidade não encontrada: %s",
+        .sens_title = "Sensores",
+        .sens_updated_fmt = "atualizado %s",
+        .sens_wait = "aguardando atualização",
+        .sens_minmax_fmt = "mín %.1f\xC2\xB0 máx %.1f\xC2\xB0",
+        .sens_hum_fmt = "%.0f%% umid",
 
         .p_title = "TinySkyBoard &mdash; configuração",
         .p_network = "Rede Wi-Fi",
@@ -54,6 +59,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_tg_hint = "Para receber mensagens: no Telegram fale com <b>@BotFather</b>, mande <b>/newbot</b> "
                      "e cole aqui o token. Depois mande qualquer mensagem pro seu bot: o primeiro chat vira "
                      "o dono. Digite <b>0</b> para desligar.",
+        .p_govee = "Chave da API Govee (opcional)",
+        .p_govee_hint = "Para mostrar os termômetros Wi-Fi da Govee: no app Govee, vá em Perfil &rarr; Configurações &rarr; <b>Solicitar chave de API</b>; ela chega por e-mail. Cole aqui. Digite <b>0</b> para desligar.",
+        .p_govee_int = "Intervalo de envio dos sensores Govee",
+        .p_govee_int_hint = "Use o mesmo intervalo de envio configurado no app Govee (padrão 10 min). O painel acompanha cada envio e mostra a hora em que a leitura mudou. Um sensor sem nenhuma mudança por 3 intervalos (pilha acabou, fora do Wi-Fi) sai da tela até voltar.",
         .p_save = "Salvar e reiniciar",
         .p_required = "Rede e cidade são obrigatórias",
         .p_saved_title = "Salvo!",
@@ -65,6 +74,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_bright_led_night = "Brilho do LED (noite)",
         .p_bright_alert = "Brilho do aviso de mensagem nova",
         .p_bright_hint = "A tela e o LED mudam sozinhos entre o brilho de dia e o de noite no nascer e no pôr do sol, com uma transição de 30 min. O aviso de mensagem nova é o piscar branco até você ler (0% = não pisca). Arraste para ver na hora.",
+        .p_t_dash = "Tempo do relógio e clima",
+        .p_t_sens = "Tempo de cada página de sensores",
+        .p_t_msg = "Tempo de cada mensagem",
+        .p_t_hint = "Quanto tempo cada tela fica no rodízio. Uma mensagem nova fica 20 s na primeira vez.",
         .p_help_link = "Ajuda",
         .p_back_link = "Configurar",
         .p_rotation = "Posição da placa",
@@ -113,6 +126,7 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .st_weather = "Clima",
         .st_no_weather = "ainda sem dados",
         .st_memory = "Memória livre",
+        .st_sens_gone = "sem leitura nova, fora da tela",
     },
     [LANG_EN] = {
         .code = "en",
@@ -152,6 +166,11 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .no_wifi_portal = "No Wi-Fi: opening setup",
         .finding_city = "Finding city...",
         .city_not_found_fmt = "City not found: %s",
+        .sens_title = "Sensors",
+        .sens_updated_fmt = "updated %s",
+        .sens_wait = "waiting for an update",
+        .sens_minmax_fmt = "min %.1f\xC2\xB0 max %.1f\xC2\xB0",
+        .sens_hum_fmt = "%.0f%% hum",
 
         .p_title = "TinySkyBoard &mdash; setup",
         .p_network = "Wi-Fi network",
@@ -167,6 +186,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_tg_hint = "To receive messages: in Telegram talk to <b>@BotFather</b>, send <b>/newbot</b> "
                      "and paste the token here. Then send any message to your bot: the first chat becomes "
                      "the owner. Type <b>0</b> to turn it off.",
+        .p_govee = "Govee API key (optional)",
+        .p_govee_hint = "To show Govee Wi-Fi thermometers: in the Govee app go to Profile &rarr; Settings &rarr; <b>Apply for API Key</b>; it arrives by email. Paste it here. Type <b>0</b> to turn it off.",
+        .p_govee_int = "Govee sensor upload interval",
+        .p_govee_int_hint = "Use the same upload interval set in the Govee app (10 min by default). The panel follows each upload and shows the time the reading changed. A sensor with no change for 3 intervals (dead battery, out of Wi-Fi) leaves the screen until it comes back.",
         .p_save = "Save and restart",
         .p_required = "Network and city are required",
         .p_saved_title = "Saved!",
@@ -178,6 +201,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_bright_led_night = "LED brightness (night)",
         .p_bright_alert = "New-message flash brightness",
         .p_bright_hint = "The screen and the LED switch between day and night brightness at sunrise and sunset, with a 30-min transition. The new-message flash is the white blink until you read it (0% = no blink). Drag to preview it live.",
+        .p_t_dash = "Clock and weather time",
+        .p_t_sens = "Time for each sensor page",
+        .p_t_msg = "Time for each message",
+        .p_t_hint = "How long each screen stays in the rotation. A new message stays 20 s the first time.",
         .p_help_link = "Help",
         .p_back_link = "Settings",
         .p_rotation = "Board position",
@@ -226,6 +253,7 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .st_weather = "Weather",
         .st_no_weather = "no data yet",
         .st_memory = "Free memory",
+        .st_sens_gone = "no new reading, off the screen",
     },
     [LANG_ES] = {
         .code = "es",
@@ -265,6 +293,11 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .no_wifi_portal = "Sin Wi-Fi: abriendo config",
         .finding_city = "Buscando ciudad...",
         .city_not_found_fmt = "Ciudad no encontrada: %s",
+        .sens_title = "Sensores",
+        .sens_updated_fmt = "actualizado %s",
+        .sens_wait = "esperando actualización",
+        .sens_minmax_fmt = "mín %.1f\xC2\xB0 máx %.1f\xC2\xB0",
+        .sens_hum_fmt = "%.0f%% hum",
 
         .p_title = "TinySkyBoard &mdash; configuración",
         .p_network = "Red Wi-Fi",
@@ -281,6 +314,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_tg_hint = "Para recibir mensajes: en Telegram habla con <b>@BotFather</b>, envía <b>/newbot</b> "
                      "y pega aquí el token. Luego envía cualquier mensaje a tu bot: el primer chat se vuelve "
                      "el dueño. Escribe <b>0</b> para desactivarlo.",
+        .p_govee = "Clave de la API de Govee (opcional)",
+        .p_govee_hint = "Para mostrar los termómetros Wi-Fi de Govee: en la app Govee ve a Perfil &rarr; Ajustes &rarr; <b>Solicitar clave de API</b>; llega por correo. Pégala aquí. Escribe <b>0</b> para desactivarla.",
+        .p_govee_int = "Intervalo de envío de los sensores Govee",
+        .p_govee_int_hint = "Usa el mismo intervalo de envío configurado en la app Govee (10 min por defecto). El panel sigue cada envío y muestra la hora en que cambió la lectura. Un sensor sin ningún cambio durante 3 intervalos (pila agotada, fuera del Wi-Fi) sale de la pantalla hasta que vuelva.",
         .p_save = "Guardar y reiniciar",
         .p_required = "La red y la ciudad son obligatorias",
         .p_saved_title = "¡Guardado!",
@@ -292,6 +329,10 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .p_bright_led_night = "Brillo del LED (noche)",
         .p_bright_alert = "Brillo del aviso de mensaje nuevo",
         .p_bright_hint = "La pantalla y el LED cambian solos entre el brillo de día y el de noche al amanecer y al atardecer, con una transición de 30 min. El aviso de mensaje nuevo es el parpadeo blanco hasta que lo leas (0% = no parpadea). Arrastra para verlo al instante.",
+        .p_t_dash = "Tiempo del reloj y el clima",
+        .p_t_sens = "Tiempo de cada página de sensores",
+        .p_t_msg = "Tiempo de cada mensaje",
+        .p_t_hint = "Cuánto tiempo queda cada pantalla en la rotación. Un mensaje nuevo queda 20 s la primera vez.",
         .p_help_link = "Ayuda",
         .p_back_link = "Configurar",
         .p_rotation = "Posición de la placa",
@@ -340,6 +381,7 @@ static const i18n_t LANGS[LANG_COUNT] = {
         .st_weather = "Clima",
         .st_no_weather = "aún sin datos",
         .st_memory = "Memoria libre",
+        .st_sens_gone = "sin lectura nueva, fuera de la pantalla",
     },
 };
 

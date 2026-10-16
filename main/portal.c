@@ -169,6 +169,25 @@ static void send_slider(httpd_req_t *req, const char *name, const char *label, i
     httpd_resp_sendstr_chunk(req, html);
 }
 
+// Time slider (screen cycle in s, sensor interval in min); no live preview: it only matters over time
+static void send_time(httpd_req_t *req, const char *name, const char *label, int min, int max, int def,
+                      const char *unit)
+{
+    int value = config_get_u8_def(name, def);
+    char html[320];
+    snprintf(html, sizeof(html),
+             "<label>%s <span class=rv id=%s_v>%d %s</span></label>"
+             "<input type=range name=%s min=%d max=%d value=%d "
+             "oninput=\"document.getElementById('%s_v').textContent=this.value+' %s'\">",
+             label, name, value, unit, name, min, max, value, name, unit);
+    httpd_resp_sendstr_chunk(req, html);
+}
+
+static void send_seconds(httpd_req_t *req, const char *name, const char *label)
+{
+    send_time(req, name, label, CYCLE_MIN_S, CYCLE_MAX_S, CYCLE_DEFAULT_S, "s");
+}
+
 // Board position picker: 4 drawings (USB, C/R buttons and the screen with upright text).
 // Tapping one rotates the screen right away (/preview?usb=N) to check before saving.
 static void send_rotation(httpd_req_t *req, const i18n_t *L)
@@ -307,12 +326,28 @@ static esp_err_t root_get(httpd_req_t *req)
     send_slider(req, "led_alert", L->p_bright_alert, 0, config_get_u8_def("led_alert", DIM_DEFAULT_ALERT));
     httpd_resp_sendstr_chunk(req, "<small>");
     httpd_resp_sendstr_chunk(req, L->p_bright_hint);
+    httpd_resp_sendstr_chunk(req, "</small>");
+    send_seconds(req, "t_dash", L->p_t_dash);
+    send_seconds(req, "t_sens", L->p_t_sens);
+    send_seconds(req, "t_msg", L->p_t_msg);
+    httpd_resp_sendstr_chunk(req, "<small>");
+    httpd_resp_sendstr_chunk(req, L->p_t_hint);
     httpd_resp_sendstr_chunk(req, "</small><label>");
     httpd_resp_sendstr_chunk(req, L->p_tg);
     httpd_resp_sendstr_chunk(req, "</label><input name=tg autocomplete=off placeholder=\"");
     httpd_resp_sendstr_chunk(req, g_cfg.tg_token[0] ? L->p_tg_set : "123456789:ABC...");
     httpd_resp_sendstr_chunk(req, "\"><small>");
     httpd_resp_sendstr_chunk(req, L->p_tg_hint);
+    httpd_resp_sendstr_chunk(req, "</small><label>");
+    httpd_resp_sendstr_chunk(req, L->p_govee);
+    httpd_resp_sendstr_chunk(req, "</label><input name=govee autocomplete=off placeholder=\"");
+    httpd_resp_sendstr_chunk(req, g_cfg.govee_key[0] ? L->p_tg_set : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
+    httpd_resp_sendstr_chunk(req, "\"><small>");
+    httpd_resp_sendstr_chunk(req, L->p_govee_hint);
+    httpd_resp_sendstr_chunk(req, "</small>");
+    send_time(req, "govee_int", L->p_govee_int, 1, 60, GOVEE_DEFAULT_MIN, "min");
+    httpd_resp_sendstr_chunk(req, "<small>");
+    httpd_resp_sendstr_chunk(req, L->p_govee_int_hint);
     httpd_resp_sendstr_chunk(req, "</small><button>");
     httpd_resp_sendstr_chunk(req, L->p_save);
     char footer[96];
@@ -357,7 +392,7 @@ static void restart_task(void *arg)
 
 static esp_err_t save_post(httpd_req_t *req)
 {
-    char body[768];
+    char body[1024];
     int len = req->content_len < sizeof(body) - 1 ? req->content_len : sizeof(body) - 1;
     int got = 0;
     while (got < len) {
@@ -369,12 +404,13 @@ static esp_err_t save_post(httpd_req_t *req)
     }
     body[got] = '\0';
 
-    char ssid[33], pass[65], city[48], unit[4], tg[80], lang[4], num[8];
+    char ssid[33], pass[65], city[48], unit[4], tg[80], govee[48], lang[4], num[8];
     form_value(body, "ssid", ssid, sizeof(ssid));
     form_value(body, "pass", pass, sizeof(pass));
     form_value(body, "city", city, sizeof(city));
     form_value(body, "unit", unit, sizeof(unit));
     form_value(body, "tg", tg, sizeof(tg));
+    form_value(body, "govee", govee, sizeof(govee));
     form_value(body, "lang", lang, sizeof(lang));
 
     if (!ssid[0] || !city[0]) {
@@ -396,6 +432,16 @@ static esp_err_t save_post(httpd_req_t *req)
         strlcpy(g_cfg.tg_token, tg, sizeof(g_cfg.tg_token));
         g_cfg.tg_owner = 0;   // new bot, new owner
     }
+    // pasted keys often come with spaces around them
+    char *g = govee + strspn(govee, " \t");
+    for (char *e = g + strlen(g); e > g && (e[-1] == ' ' || e[-1] == '\t'); *--e = '\0') {
+    }
+    memmove(govee, g, strlen(g) + 1);
+    if (strcmp(govee, "0") == 0) {
+        g_cfg.govee_key[0] = '\0';
+    } else if (govee[0]) {
+        strlcpy(g_cfg.govee_key, govee, sizeof(g_cfg.govee_key));
+    }
     config_save();
     config_set_u8("fahr", unit[0] == 'f');
     if (form_value(body, "usb", num, sizeof(num))) {
@@ -409,6 +455,17 @@ static esp_err_t save_post(httpd_req_t *req)
         if (form_value(body, BRIGHT[i], num, sizeof(num))) {
             int v = atoi(num);
             config_set_u8(BRIGHT[i], v < 0 ? 0 : v > 100 ? 100 : v);
+        }
+    }
+    if (form_value(body, "govee_int", num, sizeof(num))) {
+        int v = atoi(num);
+        config_set_u8("govee_int", v < 1 ? 1 : v > 60 ? 60 : v);
+    }
+    static const char *const TIMES[] = {"t_dash", "t_sens", "t_msg"};
+    for (int i = 0; i < 3; i++) {
+        if (form_value(body, TIMES[i], num, sizeof(num))) {
+            int v = atoi(num);
+            config_set_u8(TIMES[i], v < CYCLE_MIN_S ? CYCLE_MIN_S : v > CYCLE_MAX_S ? CYCLE_MAX_S : v);
         }
     }
     for (uint8_t i = 0; i < LANG_COUNT; i++) {

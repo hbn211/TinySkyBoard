@@ -60,6 +60,11 @@ void led_set_level(uint8_t percent);   // max brightness, 0 = off
 #define DIM_DEFAULT_LED    35
 #define DIM_DEFAULT_LED_NIGHT 8
 #define DIM_DEFAULT_ALERT  50   // new-message flash, 0 = no flash
+
+// screen cycle: seconds each screen stays (setup page; NVS keys t_dash, t_sens, t_msg)
+#define CYCLE_DEFAULT_S    5
+#define CYCLE_MIN_S        2
+#define CYCLE_MAX_S        30
 void dimmer_start(bool follow_sun);     // false = only applies the day brightness (setup mode)
 void dimmer_set_sun(time_t sunrise, time_t sunset);
 
@@ -68,11 +73,37 @@ void net_start(void);
 // HTTPS + JSON parse of the response; GET if post_body is NULL, otherwise POST with a JSON body.
 // NULL on error. Free with cJSON_Delete.
 struct cJSON *net_http_json(const char *url, const char *post_body, int timeout_ms);
+// Same, with one extra request header (e.g. an API key)
+struct cJSON *net_http_json_hdr(const char *url, const char *post_body, const char *hdr, const char *hdr_value,
+                                int timeout_ms);
 void net_url_encode(const char *in, char *out, size_t size);
 bool net_get_weather(weather_t *out);   // last downloaded weather
 
 // telegram.c — receives bot messages and shows them on the panel
 void telegram_start(void);
+
+// govee.c — Govee thermometers (cloud OpenAPI)
+// The API has no timestamp and keeps answering online with the last value after a sensor dies,
+// so a reading counts only when it changes. The task finds when a sensor uploads (polling every
+// GOVEE_FAST_S), then sleeps until just before the next upload (interval from the setup page).
+#define GOVEE_MAX            8
+#define GOVEE_FAST_S         5    // polling while waiting for an upload
+#define GOVEE_DEFAULT_MIN    10   // the sensor's upload interval (Govee app setting), NVS "govee_int"
+#define GOVEE_STALE_UPLOADS  3    // no change in this many intervals = gone from the screen
+typedef struct {
+    char name[32];
+    float temp_c;
+    float humidity;         // -1 = the sensor has none
+    time_t changed_at;      // when a new reading was seen; 0 = none since power-on yet
+    float day_min, day_max; // today's range (seen by the panel since midnight or since it powered on)
+    int trend;              // temperature over the last hour: 1 rising, -1 falling, 0 steady
+    bool has_trend;         // false until there's ~30 min of history
+    bool shown;             // alive (on the screen); false = no new reading for a while
+} govee_sensor_t;
+void govee_start(void);
+// sensors with a reading, in the account's order; all = false: only the ones to show on the screen
+int govee_get(govee_sensor_t *out, int max, bool all);
+uint32_t govee_version(void);   // changes when there's new data (UI polls it)
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);

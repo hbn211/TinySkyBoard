@@ -2,13 +2,13 @@
 
 A desk clock, weather station and message board for the
 [Waveshare ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm).
-It shows the time, current weather and a 5-day forecast, and displays messages you send
-from your phone over Telegram — right away or on a schedule.
+It shows the time, current weather and a 5-day forecast, readings from your Govee Wi-Fi
+thermometers, and messages you send from your phone over Telegram — right away or on a schedule.
 
 Everything is configured from your phone through a setup page served by the board itself:
 no reflashing when you move or change networks.
 
-**Version 1.0.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.1.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -25,16 +25,20 @@ the setup page and in the bot's `/status` reply.
   from the city.
 - **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key.
   Just type the city name; coordinates are looked up automatically.
+- **Govee thermometers** (optional, e.g. H5179): temperature, humidity, today's low/high and the
+  trend over the last hour, with the time of the last upload. One sensor fills the screen; two
+  share it. A sensor that stops reporting leaves the screen by itself.
 - **Telegram messages** on the screen. Up to 5 messages take turns with the dashboard.
   The bot warns you when a message is too long to fit.
 - **Scheduled messages** (`/schedule`): a step-by-step assistant with quick-reply buttons —
   time, duration and repeat (once, every day, Mon–Fri, weekends).
 - **Uptime notices**: the bot tells you when the panel powers on (and why — e.g. a power cut,
   with how long it was off) and when the internet comes back after an outage. `/status` answers
-  whether it's alive.
+  whether it's alive, and lists the Govee sensors.
 - **Day/night dimmer**: screen and LED brightness follow local sunrise and sunset, with a
   30-minute transition.
-- **RGB LED** in the color of the current weather, blinking when a message arrives.
+- **RGB LED** in the color of the current weather, blinking white until new messages are read.
+- **Adjustable rotation**: how long the clock, sensor pages and messages stay on screen (5 s by default).
 - **Setup portal**: the board creates its own Wi-Fi with a QR code on screen. Pick the network,
   city, language, unit, board orientation and brightness (with live preview) from your phone.
 - **Three languages** — English, Portuguese and Spanish — on the screen, the setup page and
@@ -97,6 +101,35 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 | Hold 2 s on the **Set up over Wi-Fi** card (after the last message) | Opens the setup page on your home network and shows a QR code with the board's address. A click closes it; it closes by itself after 10 minutes. |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
+### Screen rotation
+
+The screens take turns: **clock and weather → Govee sensor pages → messages → clock**. Pages that
+have nothing to show are skipped. Each screen stays 5 s by default; change it on the setup page
+(2–30 s). A new message stays 20 s the first time.
+
+### Govee sensors
+
+1. In the Govee app, go to **Profile → Settings → Apply for API Key**; the key arrives by email.
+2. Paste it on the setup page (**Govee API key**). Type `0` there to turn the sensors off.
+3. Set **Govee sensor upload interval** to the same value as in the Govee app (10 min by default).
+
+Every thermometer on the account shows up by itself (up to 8; the list is re-read every hour).
+Each card shows the name from the Govee app, temperature (in the panel's unit), humidity, today's
+low and high, and a trend arrow — rising ▲ or falling ▼ by 0.3° or more over the last hour, or
+steady –, after 30 minutes of history.
+
+The Govee API doesn't say when a reading was taken, and it keeps reporting a sensor as online with
+its last value after the battery dies. So the panel works from **changes**:
+
+- It polls every 5 s until the value changes (that's the upload), then sleeps until 30 s before
+  the next expected upload. That's roughly 1,000 requests per sensor per day.
+- **"updated HH:MM"** is when the reading last changed.
+- A sensor with no change for 3 intervals (30 min by default) leaves the screen until it changes
+  again. `/status` still lists it, with a warning.
+
+`tools/govee_probe.py` lists your sensors and watches their readings from a computer (it reads
+the key from the `GOVEE_API_KEY` environment variable).
+
 ### LED
 
 | LED | Meaning |
@@ -125,7 +158,7 @@ language.
 | `/list` | `/agenda` | `/lista` | List what is scheduled |
 | `/cancel N` | `/cancelar N` | `/cancelar N` | Delete schedule N |
 | `/clear` | `/limpar` | `/borrar` | Remove all messages from the screen |
-| `/status`, `/ping` | `/status` | `/estado` | Is it on? Uptime, Wi-Fi, weather |
+| `/status`, `/ping` | `/status` | `/estado` | Is it on? Uptime, Wi-Fi, weather, Govee sensors |
 | `/help` | `/ajuda` | `/ayuda` | List the commands |
 
 The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`, `12/25 09:00`
@@ -134,8 +167,8 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
 
 ## Privacy and security
 
-- **Wi-Fi password and Telegram token** entered on the setup page are stored **only on the
-  board** (NVS flash). They never touch your computer or this repository.
+- **Wi-Fi password, Telegram token and Govee API key** entered on the setup page are stored
+  **only on the board** (NVS flash). They never touch your computer or this repository.
 - Anything you type in `menuconfig` ends up in `sdkconfig` (ignored by git) **and inside the
   compiled firmware**. Don't share a `.bin` built with your credentials in `menuconfig` —
   the setup page is the safer place for them.
@@ -143,7 +176,7 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
   credentials.
 - The setup Wi-Fi **TinySkyBoard** is open while setup mode runs (at most 15 minutes).
 - When opened from the **Set up over Wi-Fi** card, the page is reachable by anyone on your home network
-  for at most 10 minutes (or until you close it). It never shows the saved Wi-Fi password or bot token.
+  for at most 10 minutes (or until you close it). It never shows the saved Wi-Fi password, bot token or Govee key.
 - The bot only obeys its owner. To hand it over, enter `0` as the token on the setup page and
   then the token again: the next chat to talk to it becomes the owner.
 
@@ -156,6 +189,7 @@ main/
   ui.c            dashboard, message screen, setup-mode screen
   net.c           Wi-Fi, NTP, Open-Meteo weather and geocoding, HTTPS helper
   telegram.c      bot: messages, commands, /schedule assistant, uptime notices
+  govee.c         Govee thermometers: polling in sync with the uploads, trend, day range
   schedule.c/.h   active messages and schedules
   dimmer.c        day/night brightness from sunrise/sunset
   led.c           RGB LED
@@ -164,6 +198,8 @@ main/
   config.c/.h     settings in NVS
   i18n.c/.h       all user-facing texts (en, pt, es)
   fonts/          Montserrat with Latin-1 accents + LVGL symbols
+tools/
+  govee_probe.py  checks the Govee API from a computer (standard library only)
 partitions.csv    single 3.9 MB app partition
 sdkconfig.defaults
 ```
@@ -176,6 +212,9 @@ The fonts in `main/fonts/` were generated with
 
 - Emoji don't show on the screen (accents do).
 - One owner per bot.
+- Govee low/high and trend start over when the panel restarts (the API has no history).
+- If a Govee sensor reports exactly the same temperature and humidity for 3 uploads in a row, it
+  leaves the screen until the next change.
 - The board-position picker assumes rotation 0 is "USB at the bottom". If "left" and "right"
   come out swapped on your board, swap the 1 and the 3 in `BOARD_USB_TO_ROT` (`main/board.h`).
 
