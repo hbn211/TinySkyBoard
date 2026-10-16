@@ -31,6 +31,7 @@ typedef struct {
     const char *msg_none;
     const char *msg_browse_hint;
     const char *msg_deleted;
+    const char *msg_unread_tag;     // "new" in the header of unread messages
     const char *cfg_title;
     const char *cfg_step1;
     const char *cfg_step2;

@@ -90,7 +90,7 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 
 | Action | What it does |
 |---|---|
-| Quick press | Shows active message #1; each press goes to the next, then back to the dashboard. 10 s without pressing returns to normal. |
+| Quick press | Shows active message #1; each press goes to the next, then back to the dashboard. 10 s without pressing returns to normal. Opening a message this way marks it read (unread ones have an orange header). |
 | Hold 2 s on a message | Deletes it (a red bar fills while you hold; let go earlier to cancel). |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
@@ -101,7 +101,7 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 | Solid blue | Connecting to Wi-Fi |
 | Solid green | Connected, fetching the weather |
 | Weather color | All good: yellow clear sky, gray cloudy, blue rain, purple storm… |
-| 3 white blinks | A message arrived |
+| Blinking white | Unread messages — stops once you open them all with a quick press (or delete them) |
 | Solid red | Wi-Fi is down (reconnects by itself) |
 | Solid orange | Setup mode |
 

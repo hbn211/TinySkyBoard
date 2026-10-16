@@ -45,7 +45,7 @@ const char *ui_weather_text(int code);  // description in the active language
 
 // led.c — RGB LED on the back of the board
 void led_start(void);
-void led_notify(void);   // blinks a few times, then goes back to the previous state
+void led_set_alert(bool on);   // unread messages: white blink until they're opened
 void led_solid(uint32_t rgb);
 void led_set_level(uint8_t percent);   // max brightness, 0 = off
 

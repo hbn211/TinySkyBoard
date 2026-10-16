@@ -12,6 +12,7 @@
 #define COLOR_CARD     lv_color_hex(0x161d2e)
 #define COLOR_MUTED    lv_color_hex(0x8a94a8)
 #define COLOR_ACCENT   lv_color_hex(0x4fc3f7)
+#define COLOR_UNREAD   lv_color_hex(0xffb74d)
 
 #define DEG "\xC2\xB0"
 
@@ -248,13 +249,14 @@ static void render_message(void)
     }
     const msg_item_t *m = &s_items[s_idx];
 
+    char count[32] = "";
     if (s_n > 1) {
-        lv_label_set_text_fmt(s_msg_title, "%s  %s  %d/%d", m->scheduled ? LV_SYMBOL_BELL : LV_SYMBOL_ENVELOPE,
-                              T->msg_title, s_idx + 1, s_n);
-    } else {
-        lv_label_set_text_fmt(s_msg_title, "%s  %s", m->scheduled ? LV_SYMBOL_BELL : LV_SYMBOL_ENVELOPE,
-                              T->msg_title);
+        snprintf(count, sizeof(count), "  %d/%d", s_idx + 1, s_n);
     }
+    // unread (not opened with the button yet): orange header with a "new" tag
+    lv_label_set_text_fmt(s_msg_title, "%s  %s%s%s%s", m->scheduled ? LV_SYMBOL_BELL : LV_SYMBOL_ENVELOPE,
+                          T->msg_title, count, m->unread ? "  \xC2\xB7  " : "", m->unread ? T->msg_unread_tag : "");
+    lv_obj_set_style_text_color(s_msg_title, m->unread ? COLOR_UNREAD : COLOR_ACCENT, 0);
 
     int w = lv_display_get_horizontal_resolution(NULL);
     int h = lv_display_get_vertical_resolution(NULL);
@@ -315,6 +317,16 @@ static void show(int idx)
 static void refresh_items(void)
 {
     s_n = msg_active(s_items, MSG_ITEMS_MAX);
+}
+
+// Showing a message in browse mode = the user opened it on purpose: mark it read
+static void browse_show(int idx)
+{
+    if (idx >= 0 && idx < s_n && s_items[idx].unread) {
+        msg_mark_read(s_items[idx].key);
+        s_items[idx].unread = false;
+    }
+    show(idx);
 }
 
 static void exit_browse(void)
@@ -427,7 +439,6 @@ static void poll_cb(lv_timer_t *t)
     }
     refresh_items();
     if ((ev & MSG_EV_NEW) && s_n > 0) {
-        led_notify();
         if (!s_browse && !s_deleting) {
             s_left = MSG_NEW_S;
             show(0);
@@ -439,7 +450,7 @@ static void poll_cb(lv_timer_t *t)
     }
     if (s_idx >= s_n) {
         if (s_browse && s_n > 0) {
-            show(s_n - 1);
+            browse_show(s_n - 1);
         } else {
             s_browse = false;
             s_left = DASH_SHOW_S;
@@ -463,7 +474,7 @@ bool ui_browse_next(void)
         }
         s_browse = true;
         s_browse_left = BROWSE_S;
-        show(0);
+        browse_show(0);
         return true;
     }
     if (s_idx + 1 >= s_n) {
@@ -471,7 +482,7 @@ bool ui_browse_next(void)
         return false;
     }
     s_browse_left = BROWSE_S;
-    show(s_idx + 1);
+    browse_show(s_idx + 1);
     return true;
 }
 
@@ -508,7 +519,7 @@ static void deleted_done_cb(lv_timer_t *t)
         exit_browse();   // it was the last one: back to the dashboard
     } else {
         s_browse_left = BROWSE_S;
-        show(s_idx);     // the next one takes the same slot
+        browse_show(s_idx);   // the next one takes the same slot
     }
 }
 

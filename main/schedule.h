@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
     uint32_t key;           // identifies the item for msg_delete()
     bool scheduled;
+    bool unread;            // not opened with the button yet
     time_t when;            // arrival (direct) or start of this occurrence (scheduled)
     char text[MSG_TEXT];
 } msg_item_t;
@@ -43,6 +44,8 @@ int msg_add_direct(const char *text);    // returns how many direct messages are
 int msg_active(msg_item_t *out, int max);   // newest first
 bool msg_delete(uint32_t key);           // repeating schedule: only hides the current occurrence
 void msg_clear_all(void);                // /clear: removes everything from the screen
+bool msg_mark_read(uint32_t key);        // opened with the button; false if it was already read
+int msg_unread_count(void);
 uint32_t msg_take_events(void);          // MSG_EV_*, since the last call
 
 int sched_list(sched_t *out);            // copies the schedules in order; returns how many

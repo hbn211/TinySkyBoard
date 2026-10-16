@@ -24,6 +24,10 @@ static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
 static sched_t s_sched[SCHED_MAX];
 static direct_t s_direct[MSG_DIRECT_MAX];
+// unread = not opened with the button yet; the LED blinks while any is unread.
+// Direct messages keep the flag across reboots; schedules only for the current occurrence.
+static uint8_t s_unread_direct[MSG_DIRECT_MAX];
+static bool s_unread_sched[SCHED_MAX];
 static uint32_t s_next_direct_id = 1;
 
 // per schedule slot: occurrence already announced and occurrence hidden by the user
@@ -40,6 +44,29 @@ static void save_sched(void)
         nvs_commit(nvs);
         nvs_close(nvs);
     }
+}
+
+static void save_unread(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, "unread", s_unread_direct, sizeof(s_unread_direct));
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+// call with s_lock held, after any change to the unread flags
+static void update_led(void)
+{
+    bool any = false;
+    for (int i = 0; i < MSG_DIRECT_MAX; i++) {
+        any |= s_direct[i].id && s_unread_direct[i];
+    }
+    for (int i = 0; i < SCHED_MAX; i++) {
+        any |= s_unread_sched[i];
+    }
+    led_set_alert(any);
 }
 
 static void save_direct(void)
@@ -125,10 +152,14 @@ static void evaluate(void)
             if (occ != s_announced[i]) {
                 ESP_LOGI(TAG, "started: %s", s_sched[i].text);
                 s_announced[i] = occ;
+                s_unread_sched[i] = true;
                 s_events |= MSG_EV_NEW | MSG_EV_CHANGED;
             }
+        } else {
+            s_unread_sched[i] = false;   // ended, dismissed or removed
         }
     }
+    update_led();
     if (mask != s_active_mask) {
         s_events |= MSG_EV_CHANGED;
         s_active_mask = mask;
@@ -153,6 +184,10 @@ void msg_init(void)
         size_t len = sizeof(s_sched);
         if (nvs_get_blob(nvs, "sched", s_sched, &len) != ESP_OK || len != sizeof(s_sched)) {
             memset(s_sched, 0, sizeof(s_sched));   // nothing saved or old format
+        }
+        len = sizeof(s_unread_direct);
+        if (nvs_get_blob(nvs, "unread", s_unread_direct, &len) != ESP_OK || len != sizeof(s_unread_direct)) {
+            memset(s_unread_direct, 0, sizeof(s_unread_direct));
         }
         len = sizeof(s_direct);
         if (nvs_get_blob(nvs, "msgs", s_direct, &len) != ESP_OK || len != sizeof(s_direct)) {
@@ -179,6 +214,7 @@ void msg_init(void)
             s_announced[i] = occ;
         }
     }
+    update_led();
     s_events = MSG_EV_CHANGED;
     xTaskCreate(msg_task, "agenda", 4096, NULL, 3, &s_task);
 }
@@ -199,7 +235,10 @@ int msg_add_direct(const char *text)
     s_direct[slot].id = s_next_direct_id++;
     s_direct[slot].when = time(NULL);
     strlcpy(s_direct[slot].text, text, sizeof(s_direct[slot].text));
+    s_unread_direct[slot] = 1;
     save_direct();
+    save_unread();
+    update_led();
     int n = 0;
     for (int i = 0; i < MSG_DIRECT_MAX; i++) {
         n += s_direct[i].id != 0;
@@ -218,6 +257,7 @@ int msg_active(msg_item_t *out, int max)
         if (s_direct[i].id) {
             out[n].key = s_direct[i].id;
             out[n].scheduled = false;
+            out[n].unread = s_unread_direct[i];
             out[n].when = (time_t)s_direct[i].when;
             strlcpy(out[n].text, s_direct[i].text, sizeof(out[n].text));
             n++;
@@ -228,6 +268,7 @@ int msg_active(msg_item_t *out, int max)
         if (clock_ok(now) && slot_visible(i, now, &occ)) {
             out[n].key = s_sched[i].id | KEY_SCHED;
             out[n].scheduled = true;
+            out[n].unread = s_unread_sched[i];
             out[n].when = occ;
             strlcpy(out[n].text, s_sched[i].text, sizeof(out[n].text));
             n++;
@@ -265,6 +306,7 @@ bool msg_delete(uint32_t key)
                 } else {
                     s_dismissed[i] = occ;   // comes back on the next repeat
                 }
+                s_unread_sched[i] = false;
                 ok = true;
             }
         }
@@ -272,16 +314,60 @@ bool msg_delete(uint32_t key)
         for (int i = 0; i < MSG_DIRECT_MAX && !ok; i++) {
             if (s_direct[i].id == key) {
                 memset(&s_direct[i], 0, sizeof(s_direct[i]));
+                s_unread_direct[i] = 0;
                 save_direct();
+                save_unread();
                 ok = true;
             }
         }
     }
     if (ok) {
         s_events |= MSG_EV_CHANGED;
+        update_led();
     }
     xSemaphoreGive(s_lock);
     return ok;
+}
+
+bool msg_mark_read(uint32_t key)
+{
+    bool changed = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (key & KEY_SCHED) {
+        for (int i = 0; i < SCHED_MAX; i++) {
+            if (s_sched[i].id == (key & ~KEY_SCHED) && s_unread_sched[i]) {
+                s_unread_sched[i] = false;
+                changed = true;
+            }
+        }
+    } else {
+        for (int i = 0; i < MSG_DIRECT_MAX; i++) {
+            if (s_direct[i].id == key && s_unread_direct[i]) {
+                s_unread_direct[i] = 0;
+                save_unread();
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        update_led();
+    }
+    xSemaphoreGive(s_lock);
+    return changed;
+}
+
+int msg_unread_count(void)
+{
+    int n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < MSG_DIRECT_MAX; i++) {
+        n += s_direct[i].id && s_unread_direct[i];
+    }
+    for (int i = 0; i < SCHED_MAX; i++) {
+        n += s_unread_sched[i];
+    }
+    xSemaphoreGive(s_lock);
+    return n;
 }
 
 void msg_clear_all(void)
@@ -289,7 +375,11 @@ void msg_clear_all(void)
     time_t now = time(NULL);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     memset(s_direct, 0, sizeof(s_direct));
+    memset(s_unread_direct, 0, sizeof(s_unread_direct));
+    memset(s_unread_sched, 0, sizeof(s_unread_sched));
     save_direct();
+    save_unread();
+    update_led();
     for (int i = 0; i < SCHED_MAX; i++) {
         time_t occ;
         if (sched_is_active(&s_sched[i], now, &occ)) {

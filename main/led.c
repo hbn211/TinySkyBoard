@@ -5,19 +5,21 @@
 #include "freertos/task.h"
 
 #define STEP_MS         50
+#define ALERT_ON_MS     400     // unread message: white flash...
+#define ALERT_PERIOD_MS 1500    // ...once per period, weather color in between
 
 static volatile uint32_t s_color;
 static volatile uint8_t s_max = 90;   // current max brightness (0-255); the WS2812 is very bright up close
-static volatile int s_notify;          // pending blink phases
+static volatile bool s_alert;          // unread messages: keep blinking
 
 static void led_task(void *arg)
 {
+    uint32_t t = 0;
     while (true) {
-        if (s_notify > 0) {
-            uint8_t v = (s_notify % 2) ? 0 : s_max;
-            board_led_set(v, v, v);
-            s_notify--;
-            vTaskDelay(pdMS_TO_TICKS(150));
+        t += STEP_MS;
+        if (s_alert && t % ALERT_PERIOD_MS < ALERT_ON_MS) {
+            board_led_set(s_max, s_max, s_max);
+            vTaskDelay(pdMS_TO_TICKS(STEP_MS));
             continue;
         }
         uint32_t c = s_color;
@@ -45,7 +47,7 @@ void led_set_level(uint8_t percent)
     s_max = percent * 255 / 100;
 }
 
-void led_notify(void)
+void led_set_alert(bool on)
 {
-    s_notify = 6;   // 3 white blinks
+    s_alert = on;
 }

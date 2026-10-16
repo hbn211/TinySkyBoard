@@ -12,8 +12,8 @@
     "b{color:#fff}.k{color:#8a94a8;font-size:.9em}"                                                  \
     ".led{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;"        \
     "margin-right:8px;box-shadow:0 0 8px currentColor}"                                              \
-    ".bl{animation:bl .3s steps(2) 3}"                      \
-    "@keyframes bl{50%{opacity:0}}"                 \
+    ".bl{animation:bl 1.5s steps(1) infinite}"                      \
+    "@keyframes bl{73%{opacity:.25}}"                 \
     "</style>"
 
 // LED with the firmware's color
@@ -36,7 +36,8 @@ static const char HELP_PT[] =
     "<p>Ficam na borda da USB. Com a tela de frente e a USB para baixo: <b>esquerda = controle</b> (BOOT), "
     "<b>direita = reset</b>.</p><ul>"
     "<li><b>Clique rápido no controle:</b> mostra a mensagem ativa nº 1; cada novo clique vai para a próxima, "
-    "até voltar ao painel. Sem clicar por 10 s, volta ao normal.</li>"
+    "até voltar ao painel. Sem clicar por 10 s, volta ao normal. Abrir assim marca a mensagem como lida; "
+    "as não lidas aparecem com o cabeçalho laranja e a palavra <b>nova</b>.</li>"
     "<li><b>Segurar 2 s numa mensagem:</b> apaga essa mensagem (uma barra vermelha enche enquanto você "
     "segura; soltando antes, nada é apagado). Agendamento que se repete só some até a próxima vez.</li>"
     "<li><b>Segurar 5 s no painel:</b> entra no modo de configuração. No modo de configuração, segurar 5 s "
@@ -52,8 +53,8 @@ static const char HELP_PT[] =
     LED("90a4ae") "nublado &nbsp;" LED("b0bec5") "neblina<br>"
     LED("81d4fa") "garoa &nbsp;" LED("42a5f5") "chuva &nbsp;" LED("1e88e5") "pancadas &nbsp;"
     LED("ffffff") "neve &nbsp;" LED("ab47bc") "tempestade</li>"
-    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>3 piscadas brancas:</b> "
-    "chegou mensagem.</li>"
+    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>Piscando branco:</b> "
+    "há mensagem não lida. Para quando você abre todas com o clique rápido (ou apaga).</li>"
     "<li>" LED("ff3b30") "<b>Vermelho fixo:</b> o Wi-Fi caiu. O painel tenta reconectar sozinho.</li>"
     "<li>" LED("ff8000") "<b>Laranja fixo:</b> modo de configuração (esta página).</li></ul>"
 
@@ -102,7 +103,8 @@ static const char HELP_EN[] =
     "<p>They sit on the USB edge. With the screen facing you and the USB down: <b>left = control</b> (BOOT), "
     "<b>right = reset</b>.</p><ul>"
     "<li><b>Quick press on control:</b> shows active message #1; each new press goes to the next one, "
-    "until it's back to the panel. After 10 s without pressing, it goes back to normal.</li>"
+    "until it's back to the panel. After 10 s without pressing, it goes back to normal. Opening a message this "
+    "way marks it read; unread ones show an orange header with the word <b>new</b>.</li>"
     "<li><b>Hold 2 s on a message:</b> deletes that message (a red bar fills while you hold; let go "
     "earlier and nothing is deleted). A repeating schedule is only hidden until next time.</li>"
     "<li><b>Hold 5 s on the panel:</b> enters setup mode. In setup mode, holding 5 s exits without "
@@ -117,8 +119,8 @@ static const char HELP_EN[] =
     LED("90a4ae") "cloudy &nbsp;" LED("b0bec5") "fog<br>"
     LED("81d4fa") "drizzle &nbsp;" LED("42a5f5") "rain &nbsp;" LED("1e88e5") "showers &nbsp;"
     LED("ffffff") "snow &nbsp;" LED("ab47bc") "thunderstorm</li>"
-    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>3 white blinks:</b> "
-    "a message arrived.</li>"
+    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>Blinking white:</b> "
+    "there are unread messages. It stops once you open them all with a quick press (or delete them).</li>"
     "<li>" LED("ff3b30") "<b>Solid red:</b> Wi-Fi is down. The panel reconnects by itself.</li>"
     "<li>" LED("ff8000") "<b>Solid orange:</b> setup mode (this page).</li></ul>"
 
@@ -166,7 +168,8 @@ static const char HELP_ES[] =
     "<p>Están en el borde del USB. Con la pantalla de frente y el USB hacia abajo: <b>izquierda = control</b> "
     "(BOOT), <b>derecha = reset</b>.</p><ul>"
     "<li><b>Clic rápido en control:</b> muestra el mensaje activo nº 1; cada clic pasa al siguiente, hasta "
-    "volver al panel. Sin clics durante 10 s, vuelve a lo normal.</li>"
+    "volver al panel. Sin clics durante 10 s, vuelve a lo normal. Abrirlo así lo marca como leído; los no "
+    "leídos aparecen con el encabezado naranja y la palabra <b>nuevo</b>.</li>"
     "<li><b>Mantener 2 s en un mensaje:</b> borra ese mensaje (una barra roja se llena mientras mantienes; "
     "si sueltas antes, no se borra nada). Una programación que se repite solo se oculta hasta la próxima vez.</li>"
     "<li><b>Mantener 5 s en el panel:</b> entra al modo de configuración. En el modo de configuración, "
@@ -182,8 +185,8 @@ static const char HELP_ES[] =
     LED("90a4ae") "nublado &nbsp;" LED("b0bec5") "niebla<br>"
     LED("81d4fa") "llovizna &nbsp;" LED("42a5f5") "lluvia &nbsp;" LED("1e88e5") "chubascos &nbsp;"
     LED("ffffff") "nieve &nbsp;" LED("ab47bc") "tormenta</li>"
-    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>3 parpadeos blancos:</b> "
-    "llegó un mensaje.</li>"
+    "<li><span class='led bl' style='background:#fff;color:#fff'></span><b>Parpadeando en blanco:</b> "
+    "hay mensajes sin leer. Se detiene cuando los abres todos con el clic rápido (o los borras).</li>"
     "<li>" LED("ff3b30") "<b>Rojo fijo:</b> se cayó el Wi-Fi. El panel se reconecta solo.</li>"
     "<li>" LED("ff8000") "<b>Naranja fijo:</b> modo de configuración (esta página).</li></ul>"
 
