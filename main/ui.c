@@ -50,6 +50,8 @@ static lv_obj_t *s_del_bar;       // "hold to delete" progress
 static lv_obj_t *s_del_done;      // "deleted" notice
 static bool s_config_mode;
 
+static void build_lan_panel(int w, int h);
+
 static weather_t s_weather;
 static bool s_has_weather;
 static bool s_fahrenheit;
@@ -66,6 +68,11 @@ static int s_left = DASH_SHOW_S;   // seconds until the next switch
 static bool s_browse;       // browsing with the button
 static int s_browse_left;
 static bool s_deleting;     // showing the "deleted" notice
+static bool s_card;         // browse mode on the "set up over Wi-Fi" card (after the last message)
+static bool s_lan;          // setup page open on the home network
+static char s_lan_url[48];
+static lv_obj_t *s_lan_panel;
+static lv_obj_t *s_lan_msg;
 
 typedef struct {
     const char *text;
@@ -243,11 +250,30 @@ static void render_message(void)
     if (!s_msg_panel) {
         return;
     }
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    int aw = w - 24, ah = h - MSG_TOP - MSG_BOTTOM;
+    if (s_card) {
+        // last stop of the browse sequence: open the setup page on the home network
+        lv_label_set_text_fmt(s_msg_title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
+        lv_obj_set_style_text_color(s_msg_title, COLOR_ACCENT, 0);
+        lv_label_set_text(s_msg_when, "");
+        const lv_font_t *font = fit_font(T->card_body, aw, ah);
+        lv_obj_set_style_text_font(s_msg_label, font ? font : &font_pt_14, 0);
+        lv_label_set_long_mode(s_msg_label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_size(s_msg_label, aw, LV_SIZE_CONTENT);
+        lv_label_set_text(s_msg_label, T->card_body);
+        lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (MSG_TOP - MSG_BOTTOM) / 2);
+        lv_label_set_text(s_msg_hint, T->card_hint);
+        lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     if (s_idx < 0 || s_idx >= s_n) {
         lv_obj_add_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     const msg_item_t *m = &s_items[s_idx];
+    lv_label_set_text(s_msg_hint, T->msg_browse_hint);
 
     char count[32] = "";
     if (s_n > 1) {
@@ -258,9 +284,6 @@ static void render_message(void)
                           T->msg_title, count, m->unread ? "  \xC2\xB7  " : "", m->unread ? T->msg_unread_tag : "");
     lv_obj_set_style_text_color(s_msg_title, m->unread ? COLOR_UNREAD : COLOR_ACCENT, 0);
 
-    int w = lv_display_get_horizontal_resolution(NULL);
-    int h = lv_display_get_vertical_resolution(NULL);
-    int aw = w - 24, ah = h - MSG_TOP - MSG_BOTTOM;
     const lv_font_t *font = fit_font(m->text, aw, ah);
     lv_obj_set_style_text_font(s_msg_label, font ? font : &font_pt_14, 0);
     lv_label_set_long_mode(s_msg_label, font ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
@@ -296,7 +319,8 @@ static void show(int idx)
         s_idx = idx;
         return;
     }
-    bool was_visible = !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && s_idx >= 0;
+    bool was_visible = !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
+    s_card = false;
     s_idx = idx;
     if (idx < 0) {
         if (was_visible) {
@@ -327,6 +351,23 @@ static void browse_show(int idx)
         s_items[idx].unread = false;
     }
     show(idx);
+}
+
+static void show_card(void)
+{
+    bool was_visible = s_msg_panel && !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
+    s_idx = -1;
+    s_card = true;
+    if (!s_msg_panel) {
+        return;
+    }
+    render_message();
+    lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
+    if (was_visible) {
+        lv_obj_set_style_opa(s_msg_panel, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_fade_in(s_msg_panel, 300, 0);
+    }
 }
 
 static void exit_browse(void)
@@ -394,7 +435,7 @@ static void build_message_panel(int w, int h)
     if (s_idx >= s_n) {
         s_idx = -1;
     }
-    if (s_idx >= 0) {
+    if (s_idx >= 0 || s_card) {
         render_message();
         lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
     }
@@ -445,7 +486,7 @@ static void poll_cb(lv_timer_t *t)
             return;
         }
     }
-    if (s_deleting) {
+    if (s_deleting || s_card) {
         return;
     }
     if (s_idx >= s_n) {
@@ -467,35 +508,49 @@ bool ui_browse_next(void)
         return false;
     }
     refresh_items();
+    // sequence: message 1 .. message n, setup card, back to the dashboard
     if (!s_browse) {
-        if (s_n == 0) {
-            ui_toast(T->msg_none);
-            return false;
-        }
         s_browse = true;
         s_browse_left = BROWSE_S;
-        browse_show(0);
+        if (s_n > 0) {
+            browse_show(0);
+        } else {
+            show_card();
+        }
         return true;
     }
-    if (s_idx + 1 >= s_n) {
+    if (s_card) {
         exit_browse();
         return false;
     }
     s_browse_left = BROWSE_S;
-    browse_show(s_idx + 1);
+    if (s_idx + 1 < s_n) {
+        browse_show(s_idx + 1);
+    } else {
+        show_card();
+    }
     return true;
 }
 
-bool ui_browsing(void)
+ui_hold_t ui_hold_action(void)
 {
-    return s_browse && !s_deleting && s_idx >= 0 && s_idx < s_n;
+    if (!s_browse || s_deleting || s_lan) {
+        return UI_HOLD_NONE;
+    }
+    if (s_card) {
+        return UI_HOLD_LAN_SETUP;
+    }
+    return s_idx >= 0 && s_idx < s_n ? UI_HOLD_DELETE : UI_HOLD_NONE;
 }
 
-void ui_delete_progress(int percent)
+void ui_hold_progress(int percent)
 {
     if (!s_del_bar) {
         return;
     }
+    // red on a message (delete), blue on the setup card (open)
+    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card ? 0x4fc3f7 : 0xff4d4f), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card ? 0x16324a : 0x3a1d24), LV_PART_MAIN);
     if (percent < 0) {
         lv_obj_add_flag(s_del_bar, LV_OBJ_FLAG_HIDDEN);
         if (s_browse) {
@@ -525,7 +580,7 @@ static void deleted_done_cb(lv_timer_t *t)
 
 void ui_delete_selected(void)
 {
-    if (!ui_browsing()) {
+    if (ui_hold_action() != UI_HOLD_DELETE) {
         return;
     }
     msg_delete(s_items[s_idx].key);
@@ -702,6 +757,11 @@ static void build(void)
     render_current();
     render_forecast();
     build_message_panel(w, h);
+    s_lan_panel = NULL;   // lv_layer_top was cleaned above
+    s_lan_msg = NULL;
+    if (s_lan) {
+        build_lan_panel(w, h);
+    }
     tick_cb(NULL);
 }
 
@@ -744,6 +804,8 @@ void ui_config_message(const char *text)
 {
     if (s_config_mode && s_cfg_msg) {
         lv_label_set_text(s_cfg_msg, text);
+    } else if (s_lan && s_lan_msg) {
+        lv_label_set_text(s_lan_msg, text);
     }
 }
 
@@ -766,4 +828,85 @@ void ui_set_fahrenheit(bool on)
     ui_toast(msg);
     render_current();
     render_forecast();
+}
+
+// ---------- setup page on the home network ----------
+
+// QR code with the board's address + instructions; same layout idea as the setup-mode screen
+static void build_lan_panel(int w, int h)
+{
+    bool landscape = w > h;
+    const int qr_size = landscape ? 120 : 128;
+
+    s_lan_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_lan_panel);
+    lv_obj_set_size(s_lan_panel, w, h);
+    lv_obj_set_style_bg_color(s_lan_panel, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_lan_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_lan_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = label(s_lan_panel, &font_pt_14, COLOR_ACCENT);
+    lv_label_set_text_fmt(title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
+    lv_obj_set_pos(title, 10, 8);
+
+    lv_obj_t *qr = lv_qrcode_create(s_lan_panel);
+    lv_qrcode_set_size(qr, qr_size);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    lv_qrcode_update(qr, s_lan_url, strlen(s_lan_url));
+    lv_obj_set_style_border_color(qr, lv_color_white(), 0);
+    lv_obj_set_style_border_width(qr, 5, 0);
+
+    int tx = landscape ? qr_size + 26 : 10;
+    int ty = landscape ? 40 : 40 + qr_size + 18;
+    lv_obj_set_pos(qr, landscape ? 12 : (w - qr_size) / 2, landscape ? 36 : 34);
+
+    lv_obj_t *step = label(s_lan_panel, &font_pt_12, COLOR_MUTED);
+    lv_label_set_long_mode(step, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(step, w - tx - 8);
+    lv_label_set_text(step, T->lan_step);
+    lv_obj_set_pos(step, tx, ty);
+    lv_obj_update_layout(step);
+    ty += lv_obj_get_height(step) + 6;
+
+    lv_obj_t *url = label(s_lan_panel, &font_pt_14, lv_color_white());
+    lv_label_set_long_mode(url, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(url, w - tx - 8);
+    lv_label_set_text(url, s_lan_url);
+    lv_obj_set_pos(url, tx, ty);
+    lv_obj_update_layout(url);
+    ty += lv_obj_get_height(url) + 10;
+
+    s_lan_msg = label(s_lan_panel, &font_pt_12, COLOR_ACCENT);
+    lv_label_set_long_mode(s_lan_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_lan_msg, w - tx - 8);
+    lv_label_set_text(s_lan_msg, T->lan_close);
+    lv_obj_set_pos(s_lan_msg, tx, ty);
+}
+
+void ui_lan_setup_show(const char *url)
+{
+    strlcpy(s_lan_url, url, sizeof(s_lan_url));
+    s_lan = true;
+    s_browse = false;
+    show(-1);
+    if (!s_lan_panel) {
+        build_lan_panel(lv_display_get_horizontal_resolution(NULL), lv_display_get_vertical_resolution(NULL));
+    }
+}
+
+void ui_lan_setup_close(void)
+{
+    s_lan = false;
+    s_lan_msg = NULL;
+    if (s_lan_panel) {
+        lv_obj_delete(s_lan_panel);
+        s_lan_panel = NULL;
+    }
+    s_left = DASH_SHOW_S;
+}
+
+bool ui_lan_setup_active(void)
+{
+    return s_lan;
 }

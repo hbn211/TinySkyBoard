@@ -65,8 +65,10 @@ void app_main(void)
     }
 
     // BOOT button (control). Rotation and unit are set on the setup page.
-    //   quick click: steps through the active messages (10 s without a click goes back to the dashboard)
+    //   quick click: steps through the active messages, then the "set up over Wi-Fi" card
+    //                (10 s without a click goes back to the dashboard)
     //   hold 2 s on a message: deletes that message
+    //   hold 2 s on the setup card: opens the setup page on the home network (a click closes it)
     //   hold 5 s on the dashboard: enters (or leaves) setup mode
     const gpio_config_t btn = {
         .pin_bit_mask = 1ULL << BOOT_BTN_PIN,
@@ -76,30 +78,46 @@ void app_main(void)
     gpio_config(&btn);
 
     int held_ms = 0;
-    bool on_message = false;   // the press started with a message selected
-    bool done = false;         // this press already did its long action
+    ui_hold_t hold = UI_HOLD_NONE;   // what this press does if held (decided when it starts)
+    bool done = false;               // this press already did its long action
     while (true) {
         bool pressed = gpio_get_level(BOOT_BTN_PIN) == 0;
         if (pressed) {
             if (held_ms == 0) {
                 lvgl_port_lock(0);
-                on_message = !portal && ui_browsing();
+                hold = portal ? UI_HOLD_NONE : ui_hold_action();
                 lvgl_port_unlock();
             }
             held_ms += 20;
-            if (on_message && !done && held_ms >= DELETE_START_MS) {
-                lvgl_port_lock(0);
-                if (held_ms >= DELETE_MS) {
+            if (hold != UI_HOLD_NONE && !done && held_ms >= DELETE_START_MS) {
+                if (held_ms < DELETE_MS) {
+                    lvgl_port_lock(0);
+                    ui_hold_progress((held_ms - DELETE_START_MS) * 100 / (DELETE_MS - DELETE_START_MS));
+                    lvgl_port_unlock();
+                } else if (hold == UI_HOLD_DELETE) {
                     ESP_LOGI(TAG, "held 2 s: deleting the selected message");
+                    lvgl_port_lock(0);
                     ui_delete_selected();
+                    lvgl_port_unlock();
                     done = true;
                 } else {
-                    ui_delete_progress((held_ms - DELETE_START_MS) * 100 / (DELETE_MS - DELETE_START_MS));
+                    // setup card: open the setup page on the home network (scan + server, outside the lock)
+                    ESP_LOGI(TAG, "held 2 s: opening setup on the home network");
+                    char url[48];
+                    bool ok = portal_lan_start(url, sizeof(url));
+                    lvgl_port_lock(0);
+                    ui_hold_progress(-1);
+                    if (ok) {
+                        ui_lan_setup_show(url);
+                    } else {
+                        ui_toast(T->lan_failed);
+                    }
+                    lvgl_port_unlock();
+                    done = true;
                 }
-                lvgl_port_unlock();
-            } else if (!on_message && held_ms == HINT_PRESS_MS) {
+            } else if (hold == UI_HOLD_NONE && held_ms == HINT_PRESS_MS) {
                 toast(portal ? T->hold_exit : T->hold_config);
-            } else if (!on_message && held_ms == CONFIG_PRESS_MS) {
+            } else if (hold == UI_HOLD_NONE && held_ms == CONFIG_PRESS_MS) {
                 ESP_LOGI(TAG, "button 5 s: %s", portal ? "leaving setup mode" : "entering setup mode");
                 toast(T->restarting);
                 vTaskDelay(pdMS_TO_TICKS(300));
@@ -110,14 +128,21 @@ void app_main(void)
                 }
             }
         } else if (held_ms > 0) {
+            bool click = held_ms >= 40 && held_ms <= CLICK_MAX_MS && !portal;
             lvgl_port_lock(0);
-            if (held_ms >= 40 && held_ms <= CLICK_MAX_MS && !portal) {
-                ui_delete_progress(-1);
+            bool lan = ui_lan_setup_active();
+            if (click && lan) {
+                ui_lan_setup_close();   // a click closes the home-network setup
+            } else if (click) {
+                ui_hold_progress(-1);
                 ui_browse_next();
-            } else if (on_message && !done) {
-                ui_delete_progress(-1);   // released before 2 s: nothing is deleted
+            } else if (hold != UI_HOLD_NONE && !done) {
+                ui_hold_progress(-1);   // released before 2 s: nothing happens
             }
             lvgl_port_unlock();
+            if (click && lan) {
+                portal_lan_stop();
+            }
             held_ms = 0;
             done = false;
         }

@@ -80,7 +80,9 @@ board boots straight into setup mode.
    if not, open `http://192.168.4.1`.
 3. Pick your network, type the password and the city, then tap **Save and restart**.
 
-To change settings later, **hold the control button for 5 seconds**. The panel also opens the
+To change settings later, either click through to the **Set up over Wi-Fi** card and hold it for 2 seconds
+(the page opens on your home network, no network switching), or **hold the control button for 5 seconds**
+to restart into setup mode with its own Wi-Fi. The panel also opens the
 setup page by itself if it can't connect to Wi-Fi within 45 seconds (for example, after you
 move). Without any change, setup mode restarts after 15 minutes and tries the Wi-Fi again.
 
@@ -92,6 +94,7 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 |---|---|
 | Quick press | Shows active message #1; each press goes to the next, then back to the dashboard. 10 s without pressing returns to normal. Opening a message this way marks it read (unread ones have an orange header). |
 | Hold 2 s on a message | Deletes it (a red bar fills while you hold; let go earlier to cancel). |
+| Hold 2 s on the **Set up over Wi-Fi** card (after the last message) | Opens the setup page on your home network and shows a QR code with the board's address. A click closes it; it closes by itself after 10 minutes. |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
 ### LED
@@ -139,6 +142,8 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
 - NVS is **not encrypted**: someone with physical access to the board could read the
   credentials.
 - The setup Wi-Fi **TinySkyBoard** is open while setup mode runs (at most 15 minutes).
+- When opened from the **Set up over Wi-Fi** card, the page is reachable by anyone on your home network
+  for at most 10 minutes (or until you close it). It never shows the saved Wi-Fi password or bot token.
 - The bot only obeys its owner. To hand it over, enter `0` as the token on the setup page and
   then the token again: the next chat to talk to it becomes the owner.
 

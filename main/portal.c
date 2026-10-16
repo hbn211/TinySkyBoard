@@ -14,6 +14,8 @@
 #include "esp_system.h"
 #include "esp_http_server.h"
 #include "esp_app_desc.h"
+#include "esp_timer.h"
+#include "esp_netif.h"
 #include "esp_lvgl_port.h"
 #include "lwip/sockets.h"
 
@@ -24,6 +26,8 @@ const char *portal_help_html(uint8_t lang);   // portal_help.c
 
 static const char *TAG = "portal";
 static char s_nets[MAX_NETS][33];
+static httpd_handle_t s_server;
+static esp_timer_handle_t s_lan_timer;   // home-network setup closes by itself
 static int s_n_nets;
 
 // ---------- DNS: answers 192.168.4.1 for any name (captive portal) ----------
@@ -439,13 +443,17 @@ static esp_err_t redirect_get(httpd_req_t *req)
     return httpd_resp_send(req, NULL, 0);
 }
 
-static void http_start(void)
+// captive = own Wi-Fi: any other URL is redirected to the page (phones open it by themselves)
+static bool http_start(bool captive)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
-    httpd_handle_t server = NULL;
-    ESP_ERROR_CHECK(httpd_start(&server, &cfg));
+    if (httpd_start(&s_server, &cfg) != ESP_OK) {
+        s_server = NULL;
+        return false;
+    }
+    httpd_handle_t server = s_server;
 
     const httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = root_get};
     const httpd_uri_t save = {.uri = "/save", .method = HTTP_POST, .handler = save_post};
@@ -456,7 +464,10 @@ static void http_start(void)
     httpd_register_uri_handler(server, &save);
     httpd_register_uri_handler(server, &help);
     httpd_register_uri_handler(server, &preview);
-    httpd_register_uri_handler(server, &other);
+    if (captive) {
+        httpd_register_uri_handler(server, &other);
+    }
+    return true;
 }
 
 // ---------- Wi-Fi ----------
@@ -505,9 +516,60 @@ void portal_start(void)
     led_solid(0xff8000);
 
     scan_networks();
-    http_start();
+    ESP_ERROR_CHECK(http_start(true) ? ESP_OK : ESP_FAIL);
     xTaskCreate(dns_task, "dns", 3072, NULL, 4, NULL);
     ESP_LOGI(TAG, "portal up: Wi-Fi '%s', http://%s", PORTAL_AP_SSID, PORTAL_AP_IP);
 
     xTaskCreate(restart_task, "portal_timeout", 2048, (void *)PORTAL_TIMEOUT_MS, 1, NULL);
+}
+
+// ---------- setup on the home network (opened from the button) ----------
+
+static void lan_timeout_task(void *arg)
+{
+    ESP_LOGI(TAG, "home-network setup timed out");
+    portal_lan_stop();
+    if (lvgl_port_lock(0)) {
+        ui_lan_setup_close();
+        lvgl_port_unlock();
+    }
+    vTaskDelete(NULL);
+}
+
+static void lan_timeout_cb(void *arg)
+{
+    xTaskCreate(lan_timeout_task, "lan_timeout", 3072, NULL, 3, NULL);   // httpd_stop doesn't belong in a timer callback
+}
+
+bool portal_lan_start(char *url, size_t size)
+{
+    esp_netif_ip_info_t ip = {0};
+    esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip);
+    if (s_server || !ip.ip.addr) {
+        return false;   // already open, or not connected
+    }
+    scan_networks();   // short blip on the connection
+    if (!http_start(false)) {
+        return false;
+    }
+    snprintf(url, size, "http://" IPSTR "/", IP2STR(&ip.ip));
+    if (!s_lan_timer) {
+        const esp_timer_create_args_t args = {.callback = lan_timeout_cb, .name = "lan_setup"};
+        esp_timer_create(&args, &s_lan_timer);
+    }
+    esp_timer_start_once(s_lan_timer, (uint64_t)PORTAL_LAN_TIMEOUT_MS * 1000);
+    ESP_LOGI(TAG, "home-network setup open at %s", url);
+    return true;
+}
+
+void portal_lan_stop(void)
+{
+    if (s_lan_timer) {
+        esp_timer_stop(s_lan_timer);
+    }
+    if (s_server) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        ESP_LOGI(TAG, "home-network setup closed");
+    }
 }

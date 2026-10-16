@@ -35,10 +35,14 @@ void ui_set_fahrenheit(bool on);
 void ui_toast(const char *text);          // temporary message in the status bar
 void ui_config_message(const char *text);  // footer of the setup-mode screen
 // messages: the cycle and new ones come from schedule.c; the button browses them
-bool ui_browse_next(void);        // click: next active message (false = back to the dashboard)
-bool ui_browsing(void);           // a message is selected via the button
-void ui_delete_progress(int percent);   // "hold to delete" bar; -1 hides it
+bool ui_browse_next(void);        // click: next message, then the setup card (false = back to the dashboard)
+typedef enum { UI_HOLD_NONE, UI_HOLD_DELETE, UI_HOLD_LAN_SETUP } ui_hold_t;
+ui_hold_t ui_hold_action(void);   // what holding the button does on the current screen
+void ui_hold_progress(int percent);   // bar while holding (red = delete, blue = open setup); -1 hides it
 void ui_delete_selected(void);
+void ui_lan_setup_show(const char *url);   // QR code to the setup page on the home network
+void ui_lan_setup_close(void);
+bool ui_lan_setup_active(void);
 bool ui_text_fits(const char *text, int *max_chars);   // fits the screen in any rotation?
 uint32_t ui_weather_color(int code);   // RGB color 0xRRGGBB for the WMO code
 const char *ui_weather_text(int code);  // description in the active language
@@ -70,3 +74,7 @@ void telegram_start(void);
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);
+// Same page on the home network, opened from the button; closes after PORTAL_LAN_TIMEOUT_MS
+#define PORTAL_LAN_TIMEOUT_MS   (10 * 60 * 1000)
+bool portal_lan_start(char *url, size_t size);   // url = address for the QR code
+void portal_lan_stop(void);
