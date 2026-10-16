@@ -88,7 +88,9 @@ static const char HELP_PT[] =
     "Informe na configuração o mesmo intervalo de envio do app Govee (padrão 10 min).</li>"
     "<li>Um sensor sem leitura nova por 3 intervalos (pilha acabou, fora do Wi-Fi) sai da tela até voltar; "
     "o <code>/status</code> do bot continua mostrando ele com um aviso.</li>"
-    "<li class=k>Mínima e máxima contam desde a meia-noite ou desde que o painel ligou.</li></ul>"
+    "<li class=k>Mínima e máxima contam desde a meia-noite ou desde que o painel ligou.</li>"
+    "<li class=k>Sensor novo ou renomeado no app Govee aparece em até 1 hora (ou na hora, reiniciando o "
+    "painel).</li></ul>"
 
     "<h2>Telegram</h2>"
     "<p>Crie um bot com o <b>@BotFather</b> (<code>/newbot</code>) e cole o token na configuração. "
@@ -172,7 +174,9 @@ static const char HELP_EN[] =
     "Set the same upload interval as in the Govee app on the setup page (10 min by default).</li>"
     "<li>A sensor with no new reading for 3 intervals (dead battery, out of Wi-Fi) leaves the screen until it "
     "comes back; the bot's <code>/status</code> still lists it with a warning.</li>"
-    "<li class=k>Low and high count since midnight or since the panel powered on.</li></ul>"
+    "<li class=k>Low and high count since midnight or since the panel powered on.</li>"
+    "<li class=k>A sensor added or renamed in the Govee app shows up within 1 hour (or right away if you "
+    "restart the panel).</li></ul>"
 
     "<h2>Telegram</h2>"
     "<p>Create a bot with <b>@BotFather</b> (<code>/newbot</code>) and paste the token in the setup. "
@@ -256,7 +260,9 @@ static const char HELP_ES[] =
     "Indica en la configuración el mismo intervalo de envío de la app Govee (10 min por defecto).</li>"
     "<li>Un sensor sin lectura nueva durante 3 intervalos (pila agotada, fuera del Wi-Fi) sale de la pantalla "
     "hasta que vuelva; el <code>/status</code> del bot lo sigue mostrando con un aviso.</li>"
-    "<li class=k>La mínima y la máxima cuentan desde la medianoche o desde que el panel se encendió.</li></ul>"
+    "<li class=k>La mínima y la máxima cuentan desde la medianoche o desde que el panel se encendió.</li>"
+    "<li class=k>Un sensor nuevo o renombrado en la app Govee aparece en hasta 1 hora (o al instante si "
+    "reinicias el panel).</li></ul>"
 
     "<h2>Telegram</h2>"
     "<p>Crea un bot con <b>@BotFather</b> (<code>/newbot</code>) y pega el token en la configuración. "

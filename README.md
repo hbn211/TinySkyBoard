@@ -113,7 +113,8 @@ have nothing to show are skipped. Each screen stays 5 s by default; change it on
 2. Paste it on the setup page (**Govee API key**). Type `0` there to turn the sensors off.
 3. Set **Govee sensor upload interval** to the same value as in the Govee app (10 min by default).
 
-Every thermometer on the account shows up by itself (up to 8; the list is re-read every hour).
+Every thermometer on the account shows up by itself (up to 8). The list is re-read every hour, so a
+sensor added or renamed in the Govee app appears within an hour — or right away after a restart.
 Each card shows the name from the Govee app, temperature (in the panel's unit), humidity, today's
 low and high, and a trend arrow — rising ▲ or falling ▼ by 0.3° or more over the last hour, or
 steady –, after 30 minutes of history.
