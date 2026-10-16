@@ -50,6 +50,7 @@ const char *ui_weather_text(int code);  // description in the active language
 // led.c — RGB LED on the back of the board
 void led_start(void);
 void led_set_alert(bool on);   // unread messages: white blink until they're opened
+void led_set_alert_level(uint8_t percent, bool preview);   // flash brightness; preview = show it now
 void led_solid(uint32_t rgb);
 void led_set_level(uint8_t percent);   // max brightness, 0 = off
 
@@ -58,6 +59,7 @@ void led_set_level(uint8_t percent);   // max brightness, 0 = off
 #define DIM_DEFAULT_NIGHT  20
 #define DIM_DEFAULT_LED    35
 #define DIM_DEFAULT_LED_NIGHT 8
+#define DIM_DEFAULT_ALERT  50   // new-message flash, 0 = no flash
 void dimmer_start(bool follow_sun);     // false = only applies the day brightness (setup mode)
 void dimmer_set_sun(time_t sunrise, time_t sunset);
 

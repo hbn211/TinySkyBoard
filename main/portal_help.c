@@ -65,7 +65,8 @@ static const char HELP_PT[] =
     "<li>Na configuração há um brilho de <b>dia</b> e um de <b>noite</b> para a tela e para o LED "
     "(LED em 0% = apagado).</li>"
     "<li>O painel troca sozinho no <b>nascer e no pôr do sol</b> da sua cidade, aos poucos, em 30 min. "
-    "Tela e LED seguem os mesmos horários.</li></ul>"
+    "Tela e LED seguem os mesmos horários.</li>"
+    "<li>O <b>aviso de mensagem nova</b> (o piscar branco) tem brilho próprio; 0% desliga o piscar.</li></ul>"
 
     "<h2>Modo de configuração</h2><ul>"
     "<li>Entra segurando o BOOT por 5 s, ou sozinho quando não consegue conectar no Wi-Fi em 45 s "
@@ -134,7 +135,8 @@ static const char HELP_EN[] =
     "<li>The setup has a <b>day</b> and a <b>night</b> brightness for the screen and for the LED "
     "(LED at 0% = off).</li>"
     "<li>The panel switches by itself at <b>sunrise and sunset</b> in your city, gradually over 30 min. "
-    "Screen and LED follow the same times.</li></ul>"
+    "Screen and LED follow the same times.</li>"
+    "<li>The <b>new-message flash</b> (the white blink) has its own brightness; 0% turns the blink off.</li></ul>"
 
     "<h2>Setup mode</h2><ul>"
     "<li>Enter by holding BOOT for 5 s, or automatically when it can't connect to Wi-Fi within 45 s "
@@ -203,7 +205,8 @@ static const char HELP_ES[] =
     "<li>En la configuración hay un brillo de <b>día</b> y uno de <b>noche</b> para la pantalla y para "
     "el LED (LED en 0% = apagado).</li>"
     "<li>El panel cambia solo al <b>amanecer y al atardecer</b> de tu ciudad, poco a poco, en 30 min. "
-    "Pantalla y LED siguen los mismos horarios.</li></ul>"
+    "Pantalla y LED siguen los mismos horarios.</li>"
+    "<li>El <b>aviso de mensaje nuevo</b> (el parpadeo blanco) tiene su propio brillo; 0% lo desactiva.</li></ul>"
 
     "<h2>Modo de configuración</h2><ul>"
     "<li>Se entra manteniendo BOOT 5 s, o solo cuando no logra conectarse al Wi-Fi en 45 s "

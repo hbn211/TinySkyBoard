@@ -232,6 +232,8 @@ static esp_err_t preview_get(httpd_req_t *req)
                 ui_rebuild();
                 lvgl_port_unlock();
             }
+        } else if (httpd_query_key_value(query, "led_alert", val, sizeof(val)) == ESP_OK) {
+            led_set_alert_level(atoi(val), true);   // flashes white so you see the level
         } else if (httpd_query_key_value(query, "led_lvl", val, sizeof(val)) == ESP_OK ||
                    httpd_query_key_value(query, "led_night", val, sizeof(val)) == ESP_OK) {
             led_set_level(atoi(val));
@@ -302,6 +304,7 @@ static esp_err_t root_get(httpd_req_t *req)
     send_slider(req, "bl_night", L->p_bright_night, 1, config_get_u8_def("bl_night", DIM_DEFAULT_NIGHT));
     send_slider(req, "led_lvl", L->p_bright_led, 0, config_get_u8_def("led_lvl", DIM_DEFAULT_LED));
     send_slider(req, "led_night", L->p_bright_led_night, 0, config_get_u8_def("led_night", DIM_DEFAULT_LED_NIGHT));
+    send_slider(req, "led_alert", L->p_bright_alert, 0, config_get_u8_def("led_alert", DIM_DEFAULT_ALERT));
     httpd_resp_sendstr_chunk(req, "<small>");
     httpd_resp_sendstr_chunk(req, L->p_bright_hint);
     httpd_resp_sendstr_chunk(req, "</small><label>");
@@ -401,8 +404,8 @@ static esp_err_t save_post(httpd_req_t *req)
             config_set_u8("rot", BOARD_USB_TO_ROT[u]);
         }
     }
-    static const char *const BRIGHT[] = {"bl_day", "bl_night", "led_lvl", "led_night"};
-    for (int i = 0; i < 4; i++) {
+    static const char *const BRIGHT[] = {"bl_day", "bl_night", "led_lvl", "led_night", "led_alert"};
+    for (int i = 0; i < 5; i++) {
         if (form_value(body, BRIGHT[i], num, sizeof(num))) {
             int v = atoi(num);
             config_set_u8(BRIGHT[i], v < 0 ? 0 : v > 100 ? 100 : v);

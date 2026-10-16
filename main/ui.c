@@ -258,11 +258,15 @@ static void render_message(void)
         lv_label_set_text_fmt(s_msg_title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
         lv_obj_set_style_text_color(s_msg_title, COLOR_ACCENT, 0);
         lv_label_set_text(s_msg_when, "");
-        const lv_font_t *font = fit_font(T->card_body, aw, ah);
-        lv_obj_set_style_text_font(s_msg_label, font ? font : &font_pt_14, 0);
+        // just a big gear: the title and the footer already say what it does
+        lv_obj_set_style_text_font(s_msg_label, &font_pt_28, 0);
+        lv_obj_set_style_transform_scale(s_msg_label, 512, 0);   // 2x
+        lv_obj_set_style_transform_pivot_x(s_msg_label, lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(s_msg_label, lv_pct(50), 0);
         lv_label_set_long_mode(s_msg_label, LV_LABEL_LONG_WRAP);
         lv_obj_set_size(s_msg_label, aw, LV_SIZE_CONTENT);
-        lv_label_set_text(s_msg_label, T->card_body);
+        lv_label_set_text(s_msg_label, LV_SYMBOL_SETTINGS);
+        lv_obj_set_style_text_color(s_msg_label, COLOR_ACCENT, 0);
         lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (MSG_TOP - MSG_BOTTOM) / 2);
         lv_label_set_text(s_msg_hint, T->card_hint);
         lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
@@ -285,6 +289,8 @@ static void render_message(void)
     lv_obj_set_style_text_color(s_msg_title, m->unread ? COLOR_UNREAD : COLOR_ACCENT, 0);
 
     const lv_font_t *font = fit_font(m->text, aw, ah);
+    lv_obj_set_style_transform_scale(s_msg_label, 256, 0);
+    lv_obj_set_style_text_color(s_msg_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(s_msg_label, font ? font : &font_pt_14, 0);
     lv_label_set_long_mode(s_msg_label, font ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
     lv_obj_set_size(s_msg_label, aw, font ? LV_SIZE_CONTENT : ah);

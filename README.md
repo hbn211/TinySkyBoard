@@ -104,7 +104,7 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 | Solid blue | Connecting to Wi-Fi |
 | Solid green | Connected, fetching the weather |
 | Weather color | All good: yellow clear sky, gray cloudy, blue rain, purple storm… |
-| Blinking white | Unread messages — stops once you open them all with a quick press (or delete them) |
+| Blinking white | Unread messages — stops once you open them all with a quick press (or delete them). Its brightness is a separate setting (0% = no blink). |
 | Solid red | Wi-Fi is down (reconnects by itself) |
 | Solid orange | Setup mode |
 

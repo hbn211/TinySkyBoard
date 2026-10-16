@@ -33,7 +33,6 @@ typedef struct {
     const char *msg_deleted;
     const char *msg_unread_tag;     // "new" in the header of unread messages
     const char *card_title;         // browse card after the last message: setup on the home network
-    const char *card_body;
     const char *card_hint;
     const char *lan_step;
     const char *lan_close;
@@ -74,6 +73,7 @@ typedef struct {
     const char *p_bright_night;
     const char *p_bright_led;
     const char *p_bright_led_night;
+    const char *p_bright_alert;
     const char *p_bright_hint;
     const char *p_rotation;
     const char *p_rotation_hint;
