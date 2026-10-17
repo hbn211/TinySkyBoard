@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Telegram alerts for the Govee sensors**: min/max temperature and humidity per sensor on the
+  setup page (saved by sensor ID); one message when a reading leaves the range and one when it's
+  back, with a small margin so it doesn't repeat. Optional message when a sensor stops sending.
+- **Rain alert**, turned on/off with `/rain` (`/chuva`, `/lluvia`): 60 % chance or more within the
+  next 2 hours, at most every 6 hours.
 - Portrait: the message header shows the date/time on a second line; long titles (message,
   weather details, other cities, status list) scroll instead of being cut.
 - **Night mode** (optional, setup page, 00:00–06:00 by default): only a large amber clock that fills

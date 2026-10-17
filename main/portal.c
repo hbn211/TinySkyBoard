@@ -148,6 +148,8 @@ static const char PAGE_HEAD[] =
     "label.chk{display:flex;align-items:center;gap:10px;color:#e8ecf4}"
     "label.chk input{width:22px;height:22px;flex:none;accent-color:#4fc3f7}"
     ".hrs{display:flex;align-items:center;gap:8px}.hrs span{color:#8a94a8}"
+    ".al{margin:10px 0}.al b{display:block;margin-bottom:4px;font-weight:500}"
+    ".al4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.al4 input{padding:8px 6px;font-size:.9em}"
     ".rot{display:grid;grid-template-columns:1fr 1fr;gap:8px}"
     "label.ro{display:flex;flex-direction:column;align-items:center;gap:4px;margin:0;padding:8px;"
     "border:1px solid #263049;border-radius:10px;color:#e8ecf4;font-size:.85em;cursor:pointer}"
@@ -222,6 +224,136 @@ static void send_time(httpd_req_t *req, const char *name, const char *label, int
 static void send_seconds(httpd_req_t *req, const char *name, const char *label)
 {
     send_time(req, name, label, CYCLE_MIN_S, CYCLE_MAX_S, CYCLE_DEFAULT_S, "s");
+}
+
+static bool form_value(const char *body, const char *key, char *out, size_t size);
+
+// Sensor alerts: one row per sensor (known now or saved before), 4 limits each; blank = no limit.
+// Temperatures in the panel's unit, saved in tenths of a degree Celsius.
+static void send_alerts(httpd_req_t *req, const i18n_t *L)
+{
+    static govee_alert_t saved[GOVEE_MAX];
+    static govee_ident_t list[GOVEE_MAX];
+    int ns = govee_alerts_load(saved, GOVEE_MAX);
+    int n = govee_known(list, GOVEE_MAX);
+    for (int i = 0; i < ns && n < GOVEE_MAX; i++) {   // saved ones the panel hasn't seen (yet)
+        bool found = false;
+        for (int j = 0; j < n; j++) {
+            found |= strcmp(list[j].device, saved[i].device) == 0;
+        }
+        if (!found) {
+            strlcpy(list[n].device, saved[i].device, sizeof(list[n].device));
+            strlcpy(list[n].name, saved[i].name, sizeof(list[n].name));
+            n++;
+        }
+    }
+    bool f = config_get_u8("fahr");
+    out(req, "<label>");
+    out(req, L->p_alerts);
+    out(req, "</label><small>");
+    out(req, L->p_alerts_hint);
+    out(req, "</small>");
+    if (n == 0) {
+        out(req, "<small>");
+        out(req, L->p_alerts_none);
+        out(req, "</small>");
+    }
+    static const char *const FIELD[] = {"tn", "tx", "hn", "hx"};
+    for (int i = 0; i < n; i++) {
+        const govee_alert_t *a = NULL;
+        for (int k = 0; k < ns; k++) {
+            if (strcmp(saved[k].device, list[i].device) == 0) {
+                a = &saved[k];
+            }
+        }
+        char html[220], val[4][12] = {"", "", "", ""};
+        if (a) {
+            if (a->tmin != GOVEE_T_NONE) {
+                snprintf(val[0], sizeof(val[0]), "%.1f", f ? a->tmin / 10.0 * 9 / 5 + 32 : a->tmin / 10.0);
+            }
+            if (a->tmax != GOVEE_T_NONE) {
+                snprintf(val[1], sizeof(val[1]), "%.1f", f ? a->tmax / 10.0 * 9 / 5 + 32 : a->tmax / 10.0);
+            }
+            if (a->hmin != GOVEE_H_NONE) {
+                snprintf(val[2], sizeof(val[2]), "%d", a->hmin);
+            }
+            if (a->hmax != GOVEE_H_NONE) {
+                snprintf(val[3], sizeof(val[3]), "%d", a->hmax);
+            }
+        }
+        out(req, "<div class=al><b>");
+        send_escaped(req, list[i].name);
+        snprintf(html, sizeof(html), "</b><input type=hidden name=a%did value=\"", i);
+        out(req, html);
+        send_escaped(req, list[i].device);
+        snprintf(html, sizeof(html), "\"><input type=hidden name=a%dnm value=\"", i);
+        out(req, html);
+        send_escaped(req, list[i].name);
+        out(req, "\"><div class=al4>");
+        const char *ph[] = {L->p_al_tmin, L->p_al_tmax, L->p_al_hmin, L->p_al_hmax};
+        for (int k = 0; k < 4; k++) {
+            snprintf(html, sizeof(html),
+                     "<input name=a%d%s type=number step=%s inputmode=decimal placeholder=\"%s %s\" value=\"%s\">", i,
+                     FIELD[k], k < 2 ? "0.1" : "1", ph[k], k < 2 ? (f ? "\xC2\xB0" "F" : "\xC2\xB0" "C") : "%", val[k]);
+            out(req, html);
+        }
+        out(req, "</div></div>");
+    }
+    out(req, config_get_u8("galert_q") ? "<label class=chk><input type=checkbox name=galert_q value=1 checked> "
+                                      : "<label class=chk><input type=checkbox name=galert_q value=1> ");
+    out(req, L->p_al_silent);
+    out(req, "</label>");
+}
+
+static void save_alerts(const char *body)
+{
+    static govee_alert_t al[GOVEE_MAX];
+    static const char *const FIELD[] = {"tn", "tx", "hn", "hx"};
+    bool f = config_get_u8("fahr");
+    int n = 0;
+    for (int i = 0; i < GOVEE_MAX; i++) {
+        char key[12], v[48];
+        snprintf(key, sizeof(key), "a%did", i);
+        if (!form_value(body, key, v, sizeof(v)) || !v[0]) {
+            continue;
+        }
+        govee_alert_t a = {.tmin = GOVEE_T_NONE, .tmax = GOVEE_T_NONE, .hmin = GOVEE_H_NONE, .hmax = GOVEE_H_NONE};
+        strlcpy(a.device, v, sizeof(a.device));
+        snprintf(key, sizeof(key), "a%dnm", i);
+        form_value(body, key, a.name, sizeof(a.name));
+        bool any = false;
+        for (int k = 0; k < 4; k++) {
+            snprintf(key, sizeof(key), "a%d%s", i, FIELD[k]);
+            if (!form_value(body, key, v, sizeof(v)) || !v[0]) {
+                continue;
+            }
+            float x = strtof(v, NULL);
+            any = true;
+            if (k < 2) {
+                float c = f ? (x - 32) * 5 / 9 : x;
+                int16_t t = (int16_t)(c * 10 + (c >= 0 ? 0.5f : -0.5f));
+                if (k == 0) {
+                    a.tmin = t;
+                } else {
+                    a.tmax = t;
+                }
+            } else {
+                int h = (int)(x + 0.5f);
+                h = h < 0 ? 0 : h > 100 ? 100 : h;
+                if (k == 2) {
+                    a.hmin = h;
+                } else {
+                    a.hmax = h;
+                }
+            }
+        }
+        if (any) {
+            al[n++] = a;
+        }
+    }
+    govee_alerts_save(al, n);
+    char on[4];
+    config_set_u8("galert_q", form_value(body, "galert_q", on, sizeof(on)));
 }
 
 // Night mode: checkbox + from/to hours
@@ -432,7 +564,9 @@ static esp_err_t root_get(httpd_req_t *req)
     send_time(req, "govee_int", L->p_govee_int, 1, 60, GOVEE_DEFAULT_MIN, "min");
     out(req, "<small>");
     out(req, L->p_govee_int_hint);
-    out(req, "</small><button>");
+    out(req, "</small>");
+    send_alerts(req, L);
+    out(req, "<button>");
     out(req, L->p_save);
     char footer[96];
     snprintf(footer, sizeof(footer), "</button></form><p class=ver>TinySkyBoard v%s</p></body></html>",
@@ -476,7 +610,7 @@ static void restart_task(void *arg)
 
 static esp_err_t save_post(httpd_req_t *req)
 {
-    static char body[1280];   // static: the server task has a small stack (one request at a time)
+    static char body[2560];   // static: the server task has a small stack (one request at a time)
     int len = req->content_len < sizeof(body) - 1 ? req->content_len : sizeof(body) - 1;
     int got = 0;
     while (got < len) {
@@ -555,6 +689,7 @@ static esp_err_t save_post(httpd_req_t *req)
     }
     config_set_u8("wx_on", form_value(body, "wx_on", num, sizeof(num)));   // unchecked boxes aren't sent
     config_set_u8("night_on", form_value(body, "night_on", num, sizeof(num)));
+    save_alerts(body);
     static const char *const NIGHT[] = {"night_from", "night_to"};
     for (int i = 0; i < 2; i++) {
         if (form_value(body, NIGHT[i], num, sizeof(num))) {

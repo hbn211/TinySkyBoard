@@ -136,6 +136,12 @@ on the setup page (2–30 s). A new message stays 20 s the first time.
   drifting clouds, falling rain or snow, fog bars, lightning — plus humidity and wind in portrait.
 - **Forecast:** today and the next 4 days with a weather icon, high (white) and low (gray).
 
+### Rain alert
+
+Send `/rain` (`/chuva`, `/lluvia`) to the bot to turn it on or off. When it's on, the bot tells you
+when the chance of rain reaches 60 % this hour or in the next two (not if it's already raining),
+at most once every 6 hours: *"🌧 70 % chance of rain at 15:00 in Munich."*
+
 ### Night mode
 
 Off by default. Turn it on on the setup page and pick the hours (00:00–06:00 by default), or
@@ -188,6 +194,14 @@ its last value after the battery dies. So the panel works from **changes**:
 - A sensor with no change for 3 intervals (30 min by default) leaves the screen until it changes
   again. `/status` still lists it, with a warning.
 
+**Alerts on Telegram.** Under **Sensor alerts** on the setup page, each sensor has a min/max
+temperature (in the panel's unit) and min/max humidity; leave blank what you don't want to watch.
+The limits are saved by the sensor's Govee ID, so they survive renames. The bot sends one message
+when a reading leaves the range and one when it's back — "back" only counts once it's 0.5° (2 % for
+humidity) inside the range, so a value hovering at the limit doesn't flood you. Only new readings
+are checked. A checkbox adds a message when a sensor stops sending (the same moment it leaves the
+screen) and when it comes back. Alerts need the Telegram bot.
+
 `tools/govee_probe.py` lists your sensors and watches their readings from a computer (it reads
 the key from the `GOVEE_API_KEY` environment variable).
 
@@ -220,6 +234,7 @@ language.
 | `/list` | `/agenda` | `/lista` | List what is scheduled |
 | `/cancel N` | `/cancelar N` | `/cancelar N` | Delete schedule N |
 | `/messages` | `/mensagens` | `/mensajes` | Messages on the screen and whether they were read |
+| `/rain` | `/chuva` | `/lluvia` | Rain alert on/off (also `/rain on`, `/rain off`) |
 | `/clear` | `/limpar` | `/borrar` | Delete the sent messages (scheduled ones stay) |
 | `/status`, `/ping` | `/status` | `/estado` | Is it on? Uptime, Wi-Fi, weather, Govee sensors |
 | `/help` | `/ajuda` | `/ayuda` | List the commands |

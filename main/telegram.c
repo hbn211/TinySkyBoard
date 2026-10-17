@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_system.h"
@@ -72,16 +73,19 @@ static void reply(int64_t chat_id, const char *text)
 // Telegram "/" menu with the commands in the panel's language
 static void set_commands(void)
 {
-    static const char *const CMDS[LANG_COUNT][7][2] = {
+    static const char *const CMDS[LANG_COUNT][8][2] = {
         [LANG_PT] = {{"mensagens", "Mensagens na tela e se foram lidas"},
+                     {"chuva", "Ligar/desligar o aviso de chuva"},
                      {"agendar", "Programar uma mensagem"}, {"agenda", "Ver o que está agendado"},
                      {"cancelar", "Apagar um agendamento: /cancelar N"}, {"limpar", "Apagar as mensagens enviadas (não as agendadas)"},
                      {"status", "Ver se o painel está ligado"}, {"ajuda", "Ajuda"}},
         [LANG_EN] = {{"messages", "Messages on the panel and whether they were read"},
+                     {"rain", "Turn the rain alert on/off"},
                      {"schedule", "Schedule a message"}, {"list", "See what is scheduled"},
                      {"cancel", "Delete a schedule: /cancel N"}, {"clear", "Delete the sent messages (not the scheduled ones)"},
                      {"status", "Check that the panel is on"}, {"help", "Help"}},
         [LANG_ES] = {{"mensajes", "Mensajes en el panel y si se leyeron"},
+                     {"lluvia", "Activar/desactivar el aviso de lluvia"},
                      {"programar", "Programar un mensaje"}, {"lista", "Ver lo programado"},
                      {"cancelar", "Borrar una programación: /cancelar N"}, {"borrar", "Borrar los mensajes enviados (no los programados)"},
                      {"estado", "Ver si el panel está encendido"}, {"ayuda", "Ayuda"}},
@@ -94,7 +98,7 @@ static void set_commands(void)
     }
     cJSON *body = cJSON_CreateObject();
     cJSON *list = cJSON_AddArrayToObject(body, "commands");
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         cJSON *c = cJSON_CreateObject();
         cJSON_AddStringToObject(c, "command", CMDS[lang][i][0]);
         cJSON_AddStringToObject(c, "description", CMDS[lang][i][1]);
@@ -764,6 +768,7 @@ static void handle_command(int64_t chat_id, const char *text)
     static const char *const CANCEL[] = {"/cancelar", "/cancel"};
     static const char *const STATUS[] = {"/status", "/estado", "/ping"};
     static const char *const MESSAGES[] = {"/mensagens", "/messages", "/mensajes", "/msgs"};
+    static const char *const RAIN[] = {"/chuva", "/rain", "/lluvia"};
 
     char cmd[32];
     strlcpy(cmd, text, sizeof(cmd));
@@ -781,6 +786,14 @@ static void handle_command(int64_t chat_id, const char *text)
         send_status(chat_id);
     } else if (is_cmd(cmd, MESSAGES, 4)) {
         send_messages(chat_id);
+    } else if (is_cmd(cmd, RAIN, 3)) {
+        // "/chuva" toggles; "/chuva on|off" (or sim/não, si/no) sets it
+        bool on = !config_get_u8("rain_al");
+        if (arg[0]) {
+            on = strchr("1osSyY", arg[0]) && strncasecmp(arg, "off", 3) != 0;
+        }
+        config_set_u8("rain_al", on);
+        reply(chat_id, on ? T->tg_rain_on : T->tg_rain_off);
     } else if (is_cmd(cmd, CLEAR, 3)) {
         msg_clear_all();
         reply(chat_id, T->tg_cleared);
@@ -871,6 +884,24 @@ static void handle_message(const cJSON *msg)
 
 static volatile tg_state_t s_state = TG_OFF;
 
+// Alerts from other tasks (sensors, rain) go out from this task, between polls: one TLS
+// connection at a time, the memory is tight
+#define NOTE_MAX    240
+#define NOTE_QUEUE  6
+static QueueHandle_t s_notes;
+
+void telegram_notify(const char *text)
+{
+    if (!s_notes || !g_cfg.tg_owner) {
+        return;
+    }
+    char note[NOTE_MAX];
+    strlcpy(note, text, sizeof(note));
+    if (xQueueSend(s_notes, note, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "alert queue full, dropped: %s", note);
+    }
+}
+
 tg_state_t telegram_state(void)
 {
     return s_state;
@@ -887,8 +918,14 @@ static void telegram_task(void *arg)
     int64_t offset = 0;
     char url[256];
     while (true) {
-        // the first poll (and the first after an outage) returns at once, so the notice goes out quickly
-        int wait_s = (!announced || fail_since) ? 0 : POLL_TIMEOUT_S;
+        char note[NOTE_MAX];
+        while (announced && !fail_since && xQueueReceive(s_notes, note, 0) == pdTRUE) {
+            ESP_LOGI(TAG, "alert: %s", note);
+            reply(g_cfg.tg_owner, note);
+        }
+        // the first poll (and the first after an outage) returns at once, so the notice goes out quickly;
+        // a shorter wait while alerts are queued
+        int wait_s = (!announced || fail_since) ? 0 : uxQueueMessagesWaiting(s_notes) ? 1 : POLL_TIMEOUT_S;
         snprintf(url, sizeof(url),
                  "https://api.telegram.org/bot%s/getUpdates?timeout=%d&limit=5&offset=%" PRId64,
                  g_cfg.tg_token, wait_s, offset);
@@ -940,6 +977,7 @@ void telegram_start(void)
         nvs_get_i64(nvs, "alive", &s_prev_alive);
         nvs_close(nvs);
     }
+    s_notes = xQueueCreate(NOTE_QUEUE, NOTE_MAX);
     ESP_LOGI(TAG, "bot active, owner %" PRId64, g_cfg.tg_owner);
     xTaskCreate(telegram_task, "telegram", 10240, NULL, 3, NULL);
 }

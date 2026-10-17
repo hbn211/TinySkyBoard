@@ -1,6 +1,7 @@
 // Govee thermometers through the cloud OpenAPI 2.0 (https://developer.govee.com)
 #include "app.h"
 #include "config.h"
+#include "i18n.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -8,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 
@@ -36,7 +38,16 @@ typedef struct {
     time_t hist_t[HIST_N];
     int hist_n;
     int day;                // tm_yday + 1 of day_min/day_max
+    uint8_t alerted;        // ALERT_* already sent (cleared when back in range)
 } govee_track_t;
+
+#define ALERT_T_LOW   0x01
+#define ALERT_T_HIGH  0x02
+#define ALERT_H_LOW   0x04
+#define ALERT_H_HIGH  0x08
+#define ALERT_SILENT  0x10
+#define HYST_T        5     // tenths of a degree back inside the range before "back to normal"
+#define HYST_H        2     // percent
 
 static govee_sensor_t s_sensors[GOVEE_MAX];
 static govee_track_t s_track[GOVEE_MAX];
@@ -45,6 +56,9 @@ static int s_interval_s;
 static SemaphoreHandle_t s_lock;
 static volatile uint32_t s_version;
 static volatile int s_http;   // last API answer, for the status card
+static govee_alert_t s_alerts[GOVEE_MAX];
+static int s_nalerts;
+static bool s_alert_silent;   // "a sensor stopped sending" alert (setup page)
 
 static int64_t mono_s(void)
 {
@@ -133,6 +147,128 @@ static void add_reading(govee_sensor_t *s, govee_track_t *t, float temp_c, time_
     s->trend = !s->has_trend ? 0 : delta >= TREND_C ? 1 : delta <= -TREND_C ? -1 : 0;
 }
 
+// ---------- alerts ----------
+
+int govee_alerts_load(govee_alert_t *out, int max)
+{
+    nvs_handle_t nvs;
+    int n = 0;
+    if (nvs_open("painel", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = max * sizeof(*out);
+        if (nvs_get_blob(nvs, "galert", out, &len) == ESP_OK) {
+            n = len / sizeof(*out);
+        }
+        nvs_close(nvs);
+    }
+    return n;
+}
+
+void govee_alerts_save(const govee_alert_t *in, int n)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        if (n > 0) {
+            nvs_set_blob(nvs, "galert", in, n * sizeof(*in));
+        } else {
+            nvs_erase_key(nvs, "galert");
+        }
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+int govee_known(govee_ident_t *out, int max)
+{
+    if (!s_lock) {
+        return 0;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int n = s_n < max ? s_n : max;
+    for (int i = 0; i < n; i++) {
+        strlcpy(out[i].device, s_track[i].device, sizeof(out[i].device));
+        strlcpy(out[i].name, s_sensors[i].name, sizeof(out[i].name));
+    }
+    xSemaphoreGive(s_lock);
+    return n;
+}
+
+static const govee_alert_t *alert_for(const char *device)
+{
+    for (int i = 0; i < s_nalerts; i++) {
+        if (strcmp(s_alerts[i].device, device) == 0) {
+            return &s_alerts[i];
+        }
+    }
+    return NULL;
+}
+
+// temperature in the panel's unit, for the messages
+static void fmt_temp(char *out, size_t size, float c)
+{
+    bool f = config_get_u8("fahr");
+    snprintf(out, size, "%.1f\xC2\xB0%c", f ? c * 9 / 5 + 32 : c, f ? 'F' : 'C');
+}
+
+// One reading against the sensor's limits: one message when it leaves the range, one when it's back
+static void check_alerts(int i, float temp_c, float hum)
+{
+    govee_track_t *t = &s_track[i];
+    const govee_alert_t *a = alert_for(t->device);
+    if (!a) {
+        return;
+    }
+    const char *name = s_sensors[i].name;
+    int tt = (int)(temp_c * 10 + (temp_c >= 0 ? 0.5f : -0.5f));
+    char msg[200], v[16], lim[16];
+    uint8_t before = t->alerted & ~ALERT_SILENT;
+
+    if (a->tmax != GOVEE_T_NONE) {
+        if (!(t->alerted & ALERT_T_HIGH) && tt > a->tmax) {
+            t->alerted |= ALERT_T_HIGH;
+            fmt_temp(v, sizeof(v), temp_c);
+            fmt_temp(lim, sizeof(lim), a->tmax / 10.0f);
+            snprintf(msg, sizeof(msg), T->al_t_high_fmt, name, v, lim);
+            telegram_notify(msg);
+        } else if ((t->alerted & ALERT_T_HIGH) && tt <= a->tmax - HYST_T) {
+            t->alerted &= ~ALERT_T_HIGH;
+        }
+    }
+    if (a->tmin != GOVEE_T_NONE) {
+        if (!(t->alerted & ALERT_T_LOW) && tt < a->tmin) {
+            t->alerted |= ALERT_T_LOW;
+            fmt_temp(v, sizeof(v), temp_c);
+            fmt_temp(lim, sizeof(lim), a->tmin / 10.0f);
+            snprintf(msg, sizeof(msg), T->al_t_low_fmt, name, v, lim);
+            telegram_notify(msg);
+        } else if ((t->alerted & ALERT_T_LOW) && tt >= a->tmin + HYST_T) {
+            t->alerted &= ~ALERT_T_LOW;
+        }
+    }
+    if (hum >= 0 && a->hmax != GOVEE_H_NONE) {
+        if (!(t->alerted & ALERT_H_HIGH) && hum > a->hmax) {
+            t->alerted |= ALERT_H_HIGH;
+            snprintf(msg, sizeof(msg), T->al_h_high_fmt, name, hum, a->hmax);
+            telegram_notify(msg);
+        } else if ((t->alerted & ALERT_H_HIGH) && hum <= a->hmax - HYST_H) {
+            t->alerted &= ~ALERT_H_HIGH;
+        }
+    }
+    if (hum >= 0 && a->hmin != GOVEE_H_NONE) {
+        if (!(t->alerted & ALERT_H_LOW) && hum < a->hmin) {
+            t->alerted |= ALERT_H_LOW;
+            snprintf(msg, sizeof(msg), T->al_h_low_fmt, name, hum, a->hmin);
+            telegram_notify(msg);
+        } else if ((t->alerted & ALERT_H_LOW) && hum >= a->hmin + HYST_H) {
+            t->alerted &= ~ALERT_H_LOW;
+        }
+    }
+    if (before && !(t->alerted & ~ALERT_SILENT)) {
+        fmt_temp(v, sizeof(v), temp_c);
+        snprintf(msg, sizeof(msg), T->al_back_fmt, name, v, hum < 0 ? 0 : hum);
+        telegram_notify(msg);
+    }
+}
+
 static void poll_sensor(int i)
 {
     static uint32_t req_id;
@@ -193,6 +329,9 @@ static void poll_sensor(int i)
         s_version++;
     }
     xSemaphoreGive(s_lock);
+    if (changed) {
+        check_alerts(i, temp_c, hum);   // only new readings: the first one may be hours old
+    }
 
     if (changed) {
         // in sync: sleep until just before the next upload
@@ -240,6 +379,18 @@ static void govee_task(void *arg)
                 was_visible[i] = v;
                 s_version++;
                 ESP_LOGI(TAG, "%s %s the screen", s_sensors[i].name, v ? "is on" : "left");
+                govee_track_t *t = &s_track[i];
+                char msg[200];
+                if (!v && s_alert_silent && s_sensors[i].changed_at && !(t->alerted & ALERT_SILENT)) {
+                    t->alerted |= ALERT_SILENT;
+                    snprintf(msg, sizeof(msg), T->al_silent_fmt, s_sensors[i].name,
+                             (int)((mono_s() - t->alive_at) / 60));
+                    telegram_notify(msg);
+                } else if (v && (t->alerted & ALERT_SILENT)) {
+                    t->alerted &= ~ALERT_SILENT;
+                    snprintf(msg, sizeof(msg), T->al_alive_fmt, s_sensors[i].name);
+                    telegram_notify(msg);
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -249,6 +400,8 @@ static void govee_task(void *arg)
 void govee_start(void)
 {
     s_interval_s = config_get_u8_def("govee_int", GOVEE_DEFAULT_MIN) * 60;
+    s_nalerts = govee_alerts_load(s_alerts, GOVEE_MAX);
+    s_alert_silent = config_get_u8("galert_q");
     s_lock = xSemaphoreCreateMutex();
     xTaskCreate(govee_task, "govee", 8192, NULL, 3, NULL);
 }

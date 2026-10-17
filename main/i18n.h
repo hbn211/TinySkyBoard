@@ -107,6 +107,14 @@ typedef struct {
     const char *p_t_city;
     const char *p_govee;
     const char *p_govee_hint;
+    const char *p_alerts;
+    const char *p_alerts_hint;
+    const char *p_alerts_none;
+    const char *p_al_tmin;          // placeholders; the unit is added
+    const char *p_al_tmax;
+    const char *p_al_hmin;
+    const char *p_al_hmax;
+    const char *p_al_silent;
     const char *p_govee_int;
     const char *p_govee_int_hint;
     const char *p_save;
@@ -141,7 +149,18 @@ typedef struct {
     const char *tg_msgs_title;      // /mensagens
     const char *tg_msg_read;
     const char *tg_msg_unread;
-    const char *tg_some_dropped;    // part of the message (emoji the panel doesn't have) was left out
+    const char *tg_some_dropped;
+    // alerts (sent to the owner)
+    const char *al_t_high_fmt;      // %s sensor, %s value, %s limit (with unit)
+    const char *al_t_low_fmt;
+    const char *al_h_high_fmt;      // %s sensor, %.0f value, %d limit
+    const char *al_h_low_fmt;
+    const char *al_back_fmt;        // %s sensor, %s temperature, %.0f humidity
+    const char *al_silent_fmt;      // %s sensor, %d minutes
+    const char *al_alive_fmt;       // %s sensor
+    const char *al_rain_fmt;        // %d chance, %s time, %s city
+    const char *tg_rain_on;
+    const char *tg_rain_off;    // part of the message (emoji the panel doesn't have) was left out
     const char *tg_ok;
     const char *tg_ok_count_fmt;    // %d active messages
     const char *tg_too_long_fmt;    // %d characters, %d fit

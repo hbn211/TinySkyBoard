@@ -117,6 +117,7 @@ bool net_get_weather(weather_t *out);   // last downloaded weather
 // telegram.c — receives bot messages and shows them on the panel
 void telegram_start(void);
 typedef enum { TG_OFF, TG_CONNECTING, TG_OK, TG_FAILING } tg_state_t;
+void telegram_notify(const char *text);   // alert to the owner, sent by the bot task (any task may call it)
 tg_state_t telegram_state(void);
 
 // govee.c — Govee thermometers (cloud OpenAPI)
@@ -148,6 +149,23 @@ typedef struct {
     int shown;          // of those, on the screen
 } govee_status_t;
 govee_status_t govee_status(void);
+
+// Telegram alerts per sensor, saved by the sensor's Govee ID (survives renames). NVS "galert".
+#define GOVEE_T_NONE  INT16_MIN   // no temperature limit
+#define GOVEE_H_NONE  (-1)        // no humidity limit
+typedef struct {
+    char device[24];        // Govee device ID ("AA:BB:CC:...")
+    char name[32];          // name when saved, to list it even before the sensor is seen again
+    int16_t tmin, tmax;     // tenths of a degree Celsius
+    int8_t hmin, hmax;      // percent
+} govee_alert_t;
+int govee_alerts_load(govee_alert_t *out, int max);    // from NVS
+void govee_alerts_save(const govee_alert_t *in, int n);
+typedef struct {
+    char device[24];
+    char name[32];
+} govee_ident_t;
+int govee_known(govee_ident_t *out, int max);          // sensors on the account right now (empty if not running)
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);

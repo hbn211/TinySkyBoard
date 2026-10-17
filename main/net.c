@@ -417,6 +417,33 @@ static void fetch_city(int i)
     cJSON_Delete(root);
 }
 
+// Rain alert (turned on with /chuva): chance >= RAIN_ALERT_PCT within the next 2 hours, not when it's
+// already raining, at most once every RAIN_ALERT_GAP_S
+#define RAIN_ALERT_PCT    60
+#define RAIN_ALERT_HOURS  3          // this hour and the next two
+#define RAIN_ALERT_GAP_S  (6 * 3600)
+
+static void check_rain_alert(const weather_t *w)
+{
+    static time_t last;
+    time_t now = time(NULL);
+    int kind = weather_kind(w->code);
+    bool raining = kind == WX_DRIZZLE || kind == WX_RAIN || kind == WX_SHOWERS || kind == WX_THUNDER;
+    if (!config_get_u8("rain_al") || raining || (last && now - last < RAIN_ALERT_GAP_S)) {
+        return;
+    }
+    for (int i = 0; i < w->n_rain && i < RAIN_ALERT_HOURS; i++) {
+        if (w->rain_pct[i] >= RAIN_ALERT_PCT) {
+            char hm[12], msg[160];
+            clock_fmt(hm, sizeof(hm), w->rain_hour[i], 0);
+            snprintf(msg, sizeof(msg), T->al_rain_fmt, w->rain_pct[i], hm, g_cfg.city);
+            telegram_notify(msg);
+            last = now;
+            return;
+        }
+    }
+}
+
 static void net_task(void *arg)
 {
     EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED_BIT, false, true,
@@ -462,6 +489,9 @@ static void net_task(void *arg)
         bool ok = fetch_weather(&w);
         if (ok && w.aqi < 0 && s_has_weather) {
             w.aqi = s_last_weather.aqi;   // keep the last good air quality rather than none
+        }
+        if (ok) {
+            check_rain_alert(&w);
         }
         if (ok && lvgl_port_lock(0)) {
             ui_set_weather(&w);
