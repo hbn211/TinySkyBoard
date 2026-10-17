@@ -25,7 +25,7 @@ static TaskHandle_t s_task;
 static sched_t s_sched[SCHED_MAX];
 static direct_t s_direct[MSG_DIRECT_MAX];
 // unread = not opened with the button yet; the LED blinks while any is unread.
-// Direct messages keep the flag across reboots; schedules only for the current occurrence.
+// Unread flags survive reboots: direct messages in "unread", schedules (for the current occurrence) in "sched_st".
 static uint8_t s_unread_direct[MSG_DIRECT_MAX];
 static bool s_unread_sched[SCHED_MAX];
 static uint32_t s_next_direct_id = 1;
@@ -57,6 +57,49 @@ static void save_unread(void)
 }
 
 // call with s_lock held, after any change to the unread flags
+// Per-schedule occurrence state, saved so a reboot doesn't bring back a deleted occurrence
+// or turn an unread one into read. The id ties it to the schedule that owned the slot.
+typedef struct {
+    uint32_t id;
+    uint8_t unread;
+    int64_t announced;
+    int64_t dismissed;
+} sched_state_t;
+
+static void save_sched_state(void)
+{
+    sched_state_t st[SCHED_MAX] = {0};
+    for (int i = 0; i < SCHED_MAX; i++) {
+        st[i] = (sched_state_t){s_sched[i].id, s_unread_sched[i], s_announced[i], s_dismissed[i]};
+    }
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, "sched_st", st, sizeof(st));
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+// true for the slots whose state was saved (same schedule id)
+static uint32_t load_sched_state(nvs_handle_t nvs)
+{
+    sched_state_t st[SCHED_MAX];
+    size_t len = sizeof(st);
+    if (nvs_get_blob(nvs, "sched_st", st, &len) != ESP_OK || len != sizeof(st)) {
+        return 0;
+    }
+    uint32_t loaded = 0;
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (s_sched[i].id && st[i].id == s_sched[i].id) {
+            s_unread_sched[i] = st[i].unread;
+            s_announced[i] = st[i].announced;
+            s_dismissed[i] = st[i].dismissed;
+            loaded |= 1u << i;
+        }
+    }
+    return loaded;
+}
+
 static void update_led(void)
 {
     bool any = false;
@@ -145,6 +188,7 @@ static void evaluate(void)
     }
 
     uint32_t mask = 0;
+    bool dirty = expired;
     for (int i = 0; i < SCHED_MAX; i++) {
         time_t occ;
         if (slot_visible(i, now, &occ)) {
@@ -154,10 +198,15 @@ static void evaluate(void)
                 s_announced[i] = occ;
                 s_unread_sched[i] = true;
                 s_events |= MSG_EV_NEW | MSG_EV_CHANGED;
+                dirty = true;
             }
-        } else {
+        } else if (s_unread_sched[i]) {
             s_unread_sched[i] = false;   // ended, dismissed or removed
+            dirty = true;
         }
+    }
+    if (dirty) {
+        save_sched_state();
     }
     update_led();
     if (mask != s_active_mask) {
@@ -179,6 +228,7 @@ void msg_init(void)
 {
     s_lock = xSemaphoreCreateMutex();
 
+    uint32_t loaded = 0;
     nvs_handle_t nvs;
     if (nvs_open("painel", NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_sched);
@@ -199,6 +249,7 @@ void msg_init(void)
                 nvs_get_i64(nvs, "msg_t", &s_direct[0].when);
             }
         }
+        loaded = load_sched_state(nvs);
         nvs_close(nvs);
     }
     for (int i = 0; i < MSG_DIRECT_MAX; i++) {
@@ -206,11 +257,11 @@ void msg_init(void)
             s_next_direct_id = s_direct[i].id + 1;
         }
     }
-    // schedules already live before boot don't count as "new"
+    // without saved state (first boot of this version), schedules already live don't count as "new"
     time_t now = time(NULL);
     for (int i = 0; i < SCHED_MAX; i++) {
         time_t occ;
-        if (clock_ok(now) && sched_is_active(&s_sched[i], now, &occ)) {
+        if (!(loaded & (1u << i)) && clock_ok(now) && sched_is_active(&s_sched[i], now, &occ)) {
             s_announced[i] = occ;
         }
     }
@@ -307,6 +358,7 @@ bool msg_delete(uint32_t key)
                     s_dismissed[i] = occ;   // comes back on the next repeat
                 }
                 s_unread_sched[i] = false;
+                save_sched_state();
                 ok = true;
             }
         }
@@ -337,6 +389,7 @@ bool msg_mark_read(uint32_t key)
         for (int i = 0; i < SCHED_MAX; i++) {
             if (s_sched[i].id == (key & ~KEY_SCHED) && s_unread_sched[i]) {
                 s_unread_sched[i] = false;
+                save_sched_state();
                 changed = true;
             }
         }
@@ -386,6 +439,7 @@ void msg_clear_all(void)
             s_dismissed[i] = occ;
         }
     }
+    save_sched_state();
     s_events |= MSG_EV_CHANGED;
     xSemaphoreGive(s_lock);
 }
@@ -431,6 +485,7 @@ bool sched_add(const sched_t *s)
             s_sched[i].id = next_id;
             s_announced[i] = 0;
             s_dismissed[i] = 0;
+            s_unread_sched[i] = false;
             ok = true;
         }
     }
