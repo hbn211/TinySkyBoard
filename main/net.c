@@ -270,14 +270,29 @@ static void apply_utc_offset(int offset)
     }
 }
 
+// European air quality index (Open-Meteo air-quality API); -1 if it fails
+static int fetch_aqi(void)
+{
+    char url[200];
+    snprintf(url, sizeof(url),
+             "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%s&longitude=%s&current=european_aqi",
+             g_cfg.lat, g_cfg.lon);
+    cJSON *root = net_http_json(url, NULL, 10000);
+    const cJSON *v = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "current"), "european_aqi");
+    int aqi = cJSON_IsNumber(v) ? (int)v->valuedouble : -1;
+    cJSON_Delete(root);
+    return aqi;
+}
+
 static bool fetch_weather(weather_t *out)
 {
-    char url[320];
+    char url[448];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
-             "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m"
-             "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=auto&forecast_days=%d",
-             g_cfg.lat, g_cfg.lon, FORECAST_DAYS);
+             "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,apparent_temperature,uv_index"
+             "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max"
+             "&hourly=precipitation_probability&forecast_hours=%d&timezone=auto&forecast_days=%d",
+             g_cfg.lat, g_cfg.lon, RAIN_HOURS, FORECAST_DAYS);
 
     cJSON *root = net_http_json(url, NULL, 10000);
     const cJSON *cur = cJSON_GetObjectItem(root, "current");
@@ -303,6 +318,20 @@ static bool fetch_weather(weather_t *out)
             d->temp_max = json_at(daily, "temperature_2m_max", i);
             d->temp_min = json_at(daily, "temperature_2m_min", i);
         }
+        out->feels = json_num(cur, "apparent_temperature");
+        out->uv = json_num(cur, "uv_index");
+        out->uv_max = json_at(daily, "uv_index_max", 0);
+        // hourly chance of rain, starting with the current hour ("2026-10-17T20:00")
+        const cJSON *hourly = cJSON_GetObjectItem(root, "hourly");
+        const cJSON *htime = cJSON_GetObjectItem(hourly, "time");
+        out->n_rain = 0;
+        for (int i = 0; i < RAIN_HOURS && i < cJSON_GetArraySize(htime); i++) {
+            const char *t = cJSON_GetStringValue(cJSON_GetArrayItem(htime, i));
+            const char *hh = t ? strchr(t, 'T') : NULL;
+            out->rain_hour[i] = hh ? atoi(hh + 1) : 0;
+            out->rain_pct[i] = (int)json_at(hourly, "precipitation_probability", i);
+            out->n_rain++;
+        }
         out->updated_at = time(NULL);
         out->utc_offset = (int)json_num(root, "utc_offset_seconds");
         ESP_LOGI(TAG, "weather: %.1f C, code %d, %d days", out->temp, out->code, out->n_days);
@@ -323,6 +352,12 @@ static bool fetch_weather(weather_t *out)
         }
     }
     cJSON_Delete(root);
+    // second request only after the first answer is freed: TLS needs the memory (it failed with -141)
+    out->aqi = ok ? fetch_aqi() : -1;
+    if (ok && out->aqi < 0) {   // usually another TLS connection (bot, sensors) holding memory: try once more
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        out->aqi = fetch_aqi();
+    }
     return ok;
 }
 
@@ -425,6 +460,9 @@ static void net_task(void *arg)
         xEventGroupWaitBits(s_events, CONNECTED_BIT, false, true, portMAX_DELAY);
         weather_t w;
         bool ok = fetch_weather(&w);
+        if (ok && w.aqi < 0 && s_has_weather) {
+            w.aqi = s_last_weather.aqi;   // keep the last good air quality rather than none
+        }
         if (ok && lvgl_port_lock(0)) {
             ui_set_weather(&w);
             lvgl_port_unlock();

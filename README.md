@@ -28,6 +28,8 @@ the setup page and in the bot's `/status` reply.
 
 - **Clock and date** synced over NTP; the time zone (including daylight saving) is detected
   from the city. 24-hour or 12-hour (AM/PM) format.
+- **Weather details page**: feels-like temperature, UV index, air quality (European AQI) and the
+  chance of rain for each of the next 6 hours, with the usual color scales.
 - **Other cities** (optional, up to 4): a world-clock page per city with its local time, date,
   time difference and weather.
 - **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key. An
@@ -44,6 +46,8 @@ the setup page and in the bot's `/status` reply.
 - **Uptime notices**: the bot tells you when the panel powers on (and why — e.g. a power cut,
   with how long it was off) and when the internet comes back after an outage. `/status` answers
   whether it's alive, and lists the Govee sensors.
+- **Night mode** (optional): during the hours you choose, only a discreet clock in a warm color and
+  the LED off; a new message or a click lights the panel up for a few seconds.
 - **Day/night dimmer**: screen and LED brightness follow local sunrise and sunset, with a
   30-minute transition.
 - **RGB LED** in the color of the current weather, blinking white until new messages are read.
@@ -113,12 +117,14 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 | Hold 2 s on a message | Deletes it (a red bar fills while you hold; let go earlier to cancel). |
 | Quick press past the last message | Shows the **Set up over Wi-Fi** card: a gear on the button side and a status list — IP address, last weather update, Telegram, Govee (invalid key, sensors on screen) and uptime. |
 | Hold 2 s on the **Set up over Wi-Fi** card (after the last message) | Opens the setup page on your home network and shows a QR code with the board's address. A click closes it; it closes by itself after 10 minutes. |
+| Quick press on the **Set up over Wi-Fi** card | Goes to the **Night mode** card (moon, and whether night mode is on now). Another press goes back to the dashboard. |
+| Hold 2 s on the **Night mode** card | Turns night mode **on now** (a nap in the afternoon; it ends when you turn it off, or after 12 h) or **off** — off for the rest of tonight's hours if it's the scheduled night. The scheduled hours don't change. |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
 ### Screen rotation
 
-The screens take turns: **clock and weather → other cities → Govee sensor pages → messages →
-clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
+The screens take turns: **clock and weather → weather details → other cities → Govee sensor
+pages → messages → clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
 on the setup page (2–30 s). A new message stays 20 s the first time.
 
 ### Dashboard
@@ -129,6 +135,28 @@ on the setup page (2–30 s). A new message stays 20 s the first time.
 - **Weather now:** city, temperature and an animated icon — sun with a glow (moon at night),
   drifting clouds, falling rain or snow, fog bars, lightning — plus humidity and wind in portrait.
 - **Forecast:** today and the next 4 days with a weather icon, high (white) and low (gray).
+
+### Night mode
+
+Off by default. Turn it on on the setup page and pick the hours (00:00–06:00 by default), or
+switch it on and off right away from the **Night mode** card (after the setup card). During
+them the screen shows only a large clock (it fills the screen; in portrait, hours above minutes)
+and the date in a dim amber, and the LED stays off — the unread blink too. A message sent over
+Telegram wakes the panel for about 25 seconds; a click wakes it for 20 seconds (the first click
+only wakes it). A **scheduled** message that starts at night — say, a medicine reminder — keeps the
+panel awake and the LED **breathing red** until you open it, delete it or its time is over.
+
+### Weather details
+
+A page right after the dashboard (on by default; turn it off on the setup page):
+
+- **Feels like** — apparent temperature.
+- **UV** — the index with its WHO level (low, moderate, high, very high, extreme) in its color. At
+  night the current UV is always 0, so it shows today's maximum instead and says so.
+- **Air** — European Air Quality Index (good, fair, moderate, poor, very poor, extremely poor).
+- **Rain, next 6 h** — a bar per hour with the chance of rain; the most likely hour is highlighted.
+
+Everything comes from Open-Meteo (forecast and air-quality APIs, no key).
 
 ### Other cities
 
@@ -170,6 +198,7 @@ the key from the `GOVEE_API_KEY` environment variable).
 | Solid blue | Connecting to Wi-Fi |
 | Solid green | Connected, fetching the weather |
 | Weather color | All good: yellow clear sky, gray cloudy, blue rain, purple storm… |
+| Breathing red | A scheduled message (reminder) unread during night-mode hours |
 | Blinking white | Unread messages — stops once you open them all with a quick press (or delete them). Its brightness is a separate setting (0% = no blink). |
 | Solid red | Wi-Fi is down (reconnects by itself) |
 | Solid orange | Setup mode |

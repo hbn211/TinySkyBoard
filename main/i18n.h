@@ -34,6 +34,10 @@ typedef struct {
     const char *msg_unread_tag;     // "new" in the header of unread messages
     const char *card_title;         // browse card after the last message: setup on the home network
     const char *card_hint;
+    const char *night_card_title;   // browse card after the setup card
+    const char *night_card_on;
+    const char *night_card_off;
+    const char *night_card_hint;
     // status on the setup card
     const char *info_wifi_off;
     const char *info_weather_fmt;   // %s = time of the last update
@@ -63,6 +67,14 @@ typedef struct {
     const char *no_wifi_portal;
     const char *finding_city;
     const char *city_not_found_fmt; // %s = city
+    const char *wx_title;           // weather details page
+    const char *wx_feels;
+    const char *wx_uv;
+    const char *wx_air;
+    const char *wx_rain;            // "Rain, next 6 h"
+    const char *wx_uv_max_fmt;      // "today's max" (UV shown at night)
+    const char *uv_level[5];        // low, moderate, high, very high, extreme
+    const char *aqi_level[6];       // good, fair, moderate, poor, very poor, extremely poor
     const char *city_same_time;
     const char *city_minmax_fmt;    // %.0f min, %.0f max     // other city in the same time zone
     const char *sens_title;         // Govee sensors screen
@@ -85,6 +97,11 @@ typedef struct {
     const char *p_tg;
     const char *p_tg_set;
     const char *p_tg_hint;
+    const char *p_night_on;
+    const char *p_night_hours;
+    const char *p_night_hint;
+    const char *p_wx_on;
+    const char *p_t_wx;
     const char *p_cities;
     const char *p_cities_hint;
     const char *p_t_city;

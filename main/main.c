@@ -94,6 +94,13 @@ void app_main(void)
                     lvgl_port_lock(0);
                     ui_hold_progress((held_ms - DELETE_START_MS) * 100 / (DELETE_MS - DELETE_START_MS));
                     lvgl_port_unlock();
+                } else if (hold == UI_HOLD_NIGHT) {
+                    ESP_LOGI(TAG, "held 2 s: night mode on/off");
+                    lvgl_port_lock(0);
+                    ui_hold_progress(-1);
+                    ui_night_toggle();
+                    lvgl_port_unlock();
+                    done = true;
                 } else if (hold == UI_HOLD_DELETE) {
                     ESP_LOGI(TAG, "held 2 s: deleting the selected message");
                     lvgl_port_lock(0);

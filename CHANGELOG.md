@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Portrait: the message header shows the date/time on a second line; long titles (message,
+  weather details, other cities, status list) scroll instead of being cut.
+- **Night mode** (optional, setup page, 00:00–06:00 by default): only a large amber clock that fills
+  the screen and the LED off; a new message or a click wakes the panel for a few seconds, and an
+  unread scheduled message (a reminder) keeps it awake, with the LED breathing red, until it's read.
+  A **Night mode** card after the setup card turns it on now (a nap) or off for tonight with a 2 s hold.
+- **Weather details page** after the dashboard: feels-like temperature, UV index (today's max at
+  night), European air quality index and the chance of rain for each of the next 6 hours, with
+  the usual color scales. On by default; option and screen time on the setup page.
+
 ## 1.2.0 — 2026-10-17
 
 - **Other cities** (optional, up to 4, on the setup page): a page per city with its local time,

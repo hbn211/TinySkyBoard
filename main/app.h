@@ -5,6 +5,7 @@
 #include <time.h>
 
 #define FORECAST_DAYS 5   // today + 4 days
+#define RAIN_HOURS    6   // hourly chance of rain on the details page
 
 typedef struct {
     int wday;           // 0 = Sunday
@@ -22,6 +23,13 @@ typedef struct {
     int n_days;
     time_t updated_at;
     int utc_offset;     // seconds, from Open-Meteo (DST included)
+    // details page
+    float feels;        // apparent temperature
+    float uv, uv_max;   // now and today's max (at night "now" is always 0)
+    int aqi;            // European AQI (0..100+); -1 = unknown
+    int rain_pct[RAIN_HOURS];    // chance of rain for this hour and the next ones
+    int rain_hour[RAIN_HOURS];   // local hour of each
+    int n_rain;
 } weather_t;
 
 // Other cities (optional, setup page): local time and weather
@@ -49,13 +57,15 @@ void ui_toast(const char *text);          // temporary message in the status bar
 void ui_config_message(const char *text);  // footer of the setup-mode screen
 // messages: the cycle and new ones come from schedule.c; the button browses them
 bool ui_browse_next(void);        // click: next message, then the setup card (false = back to the dashboard)
-typedef enum { UI_HOLD_NONE, UI_HOLD_DELETE, UI_HOLD_LAN_SETUP } ui_hold_t;
+typedef enum { UI_HOLD_NONE, UI_HOLD_DELETE, UI_HOLD_LAN_SETUP, UI_HOLD_NIGHT } ui_hold_t;
 ui_hold_t ui_hold_action(void);   // what holding the button does on the current screen
 void ui_hold_progress(int percent);   // bar while holding (red = delete, blue = open setup); -1 hides it
 void ui_delete_selected(void);
 void ui_lan_setup_show(const char *url);   // QR code to the setup page on the home network
 void ui_lan_setup_close(void);
 bool ui_lan_setup_active(void);
+bool ui_night_active(void);
+void ui_night_toggle(void);   // hold on the night-mode card: on now / off for the rest of tonight   // night clock on screen (a click only wakes the panel)
 bool ui_text_fits(const char *text, int *max_chars);   // fits the screen in any rotation?
 uint32_t ui_weather_color(int code);   // RGB color 0xRRGGBB for the WMO code
 const char *ui_weather_text(int code);  // description in the active language
@@ -69,7 +79,9 @@ void weather_icon_set(struct _lv_obj_t *box, int kind, bool day);
 
 // led.c — RGB LED on the back of the board
 void led_start(void);
-void led_set_alert(bool on);   // unread messages: white blink until they're opened
+void led_set_alert(bool on);
+void led_set_quiet(bool on);
+void led_set_urgent(bool on);   // unread reminder at night: red breathing (brightness of the message flash)   // night mode: LED off (the setup page preview still works)   // unread messages: white blink until they're opened
 void led_set_alert_level(uint8_t percent, bool preview);   // flash brightness; preview = show it now
 void led_solid(uint32_t rgb);
 void led_set_level(uint8_t percent);   // max brightness, 0 = off
@@ -82,6 +94,8 @@ void led_set_level(uint8_t percent);   // max brightness, 0 = off
 #define DIM_DEFAULT_ALERT  50   // new-message flash, 0 = no flash
 
 // screen cycle: seconds each screen stays (setup page; NVS keys t_dash, t_sens, t_msg)
+#define NIGHT_DEFAULT_FROM 0    // night mode hours (NVS night_on, night_from, night_to)
+#define NIGHT_DEFAULT_TO   6
 #define CYCLE_DEFAULT_S    5
 #define CYCLE_MIN_S        2
 #define CYCLE_MAX_S        30

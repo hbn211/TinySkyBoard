@@ -1,6 +1,7 @@
 #include "app.h"
 #include "board.h"
 
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -13,6 +14,9 @@ static volatile uint8_t s_max = 90;   // current max brightness (0-255); the WS2
 static volatile bool s_alert;          // unread messages: keep blinking
 static volatile uint8_t s_alert_max = 128;   // brightness of the white flash (0-255), set on the setup page
 static volatile int s_preview_ms;      // setup page slider: show the flash for a moment
+static volatile bool s_quiet;          // night mode: LED off, unread blink included
+static volatile bool s_urgent;         // unread reminder during night hours: red, breathing
+#define BREATH_MS       3000
 
 static void led_task(void *arg)
 {
@@ -22,6 +26,19 @@ static void led_task(void *arg)
         if (s_preview_ms > 0) {
             s_preview_ms -= STEP_MS;
             board_led_set(s_alert_max, s_alert_max, s_alert_max);
+            vTaskDelay(pdMS_TO_TICKS(STEP_MS));
+            continue;
+        }
+        if (s_quiet) {
+            board_led_set(0, 0, 0);
+            vTaskDelay(pdMS_TO_TICKS(STEP_MS));
+            continue;
+        }
+        if (s_urgent) {
+            // smooth in and out: (1 - cos) / 2, never fully dark
+            float k = 0.08f + 0.92f * (1.0f - cosf(2.0f * (float)M_PI * (t % BREATH_MS) / BREATH_MS)) / 2.0f;
+            uint8_t max = s_alert_max ? s_alert_max : 60;   // a reminder shows even with the flash set to 0%
+            board_led_set((uint8_t)(max * k), 0, 0);
             vTaskDelay(pdMS_TO_TICKS(STEP_MS));
             continue;
         }
@@ -53,6 +70,16 @@ void led_set_level(uint8_t percent)
         percent = 100;
     }
     s_max = percent * 255 / 100;
+}
+
+void led_set_urgent(bool on)
+{
+    s_urgent = on;
+}
+
+void led_set_quiet(bool on)
+{
+    s_quiet = on;
 }
 
 void led_set_alert(bool on)

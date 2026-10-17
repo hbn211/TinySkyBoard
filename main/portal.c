@@ -145,6 +145,9 @@ static const char PAGE_HEAD[] =
     "button{margin-top:24px;width:100%;padding:12px;border:0;border-radius:8px;background:#4fc3f7;"
     "color:#0b0f1a;font-size:1em;font-weight:600}small{color:#8a94a8;display:block;margin-top:4px}"
     "input[type=range]{padding:0;accent-color:#4fc3f7}.rv{float:right;color:#e8ecf4}"
+    "label.chk{display:flex;align-items:center;gap:10px;color:#e8ecf4}"
+    "label.chk input{width:22px;height:22px;flex:none;accent-color:#4fc3f7}"
+    ".hrs{display:flex;align-items:center;gap:8px}.hrs span{color:#8a94a8}"
     ".rot{display:grid;grid-template-columns:1fr 1fr;gap:8px}"
     "label.ro{display:flex;flex-direction:column;align-items:center;gap:4px;margin:0;padding:8px;"
     "border:1px solid #263049;border-radius:10px;color:#e8ecf4;font-size:.85em;cursor:pointer}"
@@ -219,6 +222,35 @@ static void send_time(httpd_req_t *req, const char *name, const char *label, int
 static void send_seconds(httpd_req_t *req, const char *name, const char *label)
 {
     send_time(req, name, label, CYCLE_MIN_S, CYCLE_MAX_S, CYCLE_DEFAULT_S, "s");
+}
+
+// Night mode: checkbox + from/to hours
+static void send_night(httpd_req_t *req, const i18n_t *L)
+{
+    out(req, config_get_u8("night_on") ? "<label class=chk><input type=checkbox name=night_on value=1 checked> "
+                                      : "<label class=chk><input type=checkbox name=night_on value=1> ");
+    out(req, L->p_night_on);
+    out(req, "</label><label>");
+    out(req, L->p_night_hours);
+    out(req, "</label><div class=hrs>");
+    static const char *const NAMES[] = {"night_from", "night_to"};
+    const int defs[] = {NIGHT_DEFAULT_FROM, NIGHT_DEFAULT_TO};
+    for (int k = 0; k < 2; k++) {
+        int cur = config_get_u8_def(NAMES[k], defs[k]);
+        char opt[64];
+        snprintf(opt, sizeof(opt), "%s<select name=%s>", k ? "<span>&ndash;</span>" : "", NAMES[k]);
+        out(req, opt);
+        for (int hr = 0; hr < 24; hr++) {
+            char hm[12];
+            clock_fmt(hm, sizeof(hm), hr, 0);
+            snprintf(opt, sizeof(opt), "<option value=%d%s>%s", hr, hr == cur ? " selected" : "", hm);
+            out(req, opt);
+        }
+        out(req, "</select>");
+    }
+    out(req, "</div><small>");
+    out(req, L->p_night_hint);
+    out(req, "</small>");
 }
 
 // Board position picker: 4 drawings (USB, C/R buttons and the screen with upright text).
@@ -363,6 +395,7 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, g_cfg.h12 ? "<option value=0>24 h (14:05)<option value=1 selected>12 h (2:05 PM)"
                                             : "<option value=0 selected>24 h (14:05)<option value=1>12 h (2:05 PM)");
     out(req, "</select>");
+    send_night(req, L);
     send_rotation(req, L);
     send_slider(req, "bl_day", L->p_bright_day, 5, config_get_u8_def("bl_day", DIM_DEFAULT_DAY));
     send_slider(req, "bl_night", L->p_bright_night, 1, config_get_u8_def("bl_night", DIM_DEFAULT_NIGHT));
@@ -373,6 +406,11 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, L->p_bright_hint);
     out(req, "</small>");
     send_seconds(req, "t_dash", L->p_t_dash);
+    out(req, config_get_u8_def("wx_on", 1) ? "<label class=chk><input type=checkbox name=wx_on value=1 checked> "
+                                           : "<label class=chk><input type=checkbox name=wx_on value=1> ");
+    out(req, L->p_wx_on);
+    out(req, "</label>");
+    send_seconds(req, "t_wx", L->p_t_wx);
     send_seconds(req, "t_city", L->p_t_city);
     send_seconds(req, "t_sens", L->p_t_sens);
     send_seconds(req, "t_msg", L->p_t_msg);
@@ -515,8 +553,16 @@ static esp_err_t save_post(httpd_req_t *req)
         int v = atoi(num);
         config_set_u8("govee_int", v < 1 ? 1 : v > 60 ? 60 : v);
     }
-    static const char *const TIMES[] = {"t_dash", "t_city", "t_sens", "t_msg"};
-    for (int i = 0; i < 4; i++) {
+    config_set_u8("wx_on", form_value(body, "wx_on", num, sizeof(num)));   // unchecked boxes aren't sent
+    config_set_u8("night_on", form_value(body, "night_on", num, sizeof(num)));
+    static const char *const NIGHT[] = {"night_from", "night_to"};
+    for (int i = 0; i < 2; i++) {
+        if (form_value(body, NIGHT[i], num, sizeof(num))) {
+            config_set_u8(NIGHT[i], atoi(num) % 24);
+        }
+    }
+    static const char *const TIMES[] = {"t_dash", "t_wx", "t_city", "t_sens", "t_msg"};
+    for (int i = 0; i < 5; i++) {
         if (form_value(body, TIMES[i], num, sizeof(num))) {
             int v = atoi(num);
             config_set_u8(TIMES[i], v < CYCLE_MIN_S ? CYCLE_MIN_S : v > CYCLE_MAX_S ? CYCLE_MAX_S : v);

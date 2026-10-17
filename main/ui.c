@@ -25,6 +25,7 @@ LV_FONT_DECLARE(font_pt_12);
 LV_FONT_DECLARE(font_pt_14);
 LV_FONT_DECLARE(font_pt_20);
 LV_FONT_DECLARE(font_pt_28);
+LV_FONT_DECLARE(font_clock_100);   // digits and ':' only, for the night clock
 
 // cycle: dashboard, each sensor page, each active message (seconds, from the setup page)
 static int s_dash_s = CYCLE_DEFAULT_S;
@@ -37,6 +38,7 @@ static int s_msg_s = CYCLE_DEFAULT_S;
 
 // message text area: 36 px title on top, 22 px footer at the bottom
 #define MSG_TOP        36
+#define MSG_TOP_TALL   52   // portrait: the date/time goes on a second line under the title
 #define MSG_BOTTOM     22
 
 static lv_obj_t *s_status;
@@ -56,11 +58,13 @@ static lv_obj_t *s_msg_title;
 static lv_obj_t *s_msg_label;
 static lv_obj_t *s_msg_when;
 static lv_obj_t *s_msg_hint;      // browse-mode footer
+static int s_msg_top = MSG_TOP;   // where the message text area starts (MSG_TOP or MSG_TOP_TALL)
 static lv_obj_t *s_del_bar;       // "hold to delete" progress
 static lv_obj_t *s_del_done;      // "deleted" notice
 static bool s_config_mode;
 
 static void build_lan_panel(int w, int h);
+static void night_wake(int seconds);
 
 static weather_t s_weather;
 static bool s_has_weather;
@@ -78,7 +82,9 @@ static int s_left = CYCLE_DEFAULT_S;   // seconds until the next switch
 static bool s_browse;       // browsing with the button
 static int s_browse_left;
 static bool s_deleting;     // showing the "deleted" notice
-static bool s_card;         // browse mode on the "set up over Wi-Fi" card (after the last message)
+static bool s_card;         // browse mode on a card after the last message: "set up over Wi-Fi"...
+static bool s_card_night;   // ...or the next one, "night mode" (turn it on/off now)
+static lv_obj_t *s_card_img; // moon on the night-mode card
 static bool s_lan;          // setup page open on the home network
 static char s_lan_url[48];
 static lv_obj_t *s_lan_panel;
@@ -88,6 +94,19 @@ static lv_obj_t *s_lan_msg;
 static lv_obj_t *s_card_info;    // status list on the setup card
 static lv_obj_t *s_info_dot[INFO_ROWS];
 static lv_obj_t *s_info_txt[INFO_ROWS];
+static lv_obj_t *s_night_panel;  // night mode: only a discreet clock, over everything
+static lv_obj_t *s_night_time, *s_night_min, *s_night_date;
+static bool s_night;             // night clock on screen
+static bool s_night_on;          // setup page option
+static int s_night_from = NIGHT_DEFAULT_FROM, s_night_to = NIGHT_DEFAULT_TO;
+static int s_wake_left;          // seconds the panel stays awake at night (message, click)
+#define WAKE_MSG_S     (MSG_NEW_S + 5)
+#define WAKE_CLICK_S   20
+#define COLOR_NIGHT    lv_color_hex(0xc8823c)   // warm, dim amber
+static lv_obj_t *s_wx_panel;     // weather details, right after the dashboard
+static bool s_wx_page;           // on screen
+static bool s_wx_on = true;      // setup page option
+static int s_wx_s = CYCLE_DEFAULT_S;
 static lv_obj_t *s_city_panel;   // other cities, after the dashboard
 static lv_obj_t *s_city_time;
 static lv_obj_t *s_city_ampm;
@@ -165,6 +184,13 @@ static void label_fmt(lv_obj_t *l, const char *fmt, ...)
     vsnprintf(text, sizeof(text), fmt, ap);
     va_end(ap);
     lv_label_set_text(l, text);
+}
+
+// Single line that scrolls when it doesn't fit (titles with a name we don't control)
+static void scroll_line(lv_obj_t *l, int width)
+{
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    lv_obj_set_size(l, width, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
 }
 
 // Single line cut with "..." (LONG_DOT only cuts with a fixed height; otherwise the text wraps)
@@ -284,7 +310,7 @@ static const lv_font_t *fit_font(const char *text, int aw, int ah)
 // Fits with the smallest font both upright and sideways (the screen may be rotated later)
 static bool fits_any_rotation(const char *text)
 {
-    return fit_font(text, LCD_H_RES - 24, LCD_V_RES - MSG_TOP - MSG_BOTTOM) &&
+    return fit_font(text, LCD_H_RES - 24, LCD_V_RES - MSG_TOP_TALL - MSG_BOTTOM) &&
            fit_font(text, LCD_V_RES - 24, LCD_H_RES - MSG_TOP - MSG_BOTTOM);
 }
 
@@ -350,7 +376,10 @@ static void info_row(int i, uint32_t color, const char *fmt, ...)
     vsnprintf(text, sizeof(text), fmt, ap);
     va_end(ap);
     lv_obj_set_style_bg_color(s_info_dot[i], lv_color_hex(color), 0);
-    lv_label_set_text(s_info_txt[i], text);
+    // only when it changes: setting the text restarts the scrolling of long lines
+    if (strcmp(lv_label_get_text(s_info_txt[i]), text) != 0) {
+        lv_label_set_text(s_info_txt[i], text);
+    }
 }
 
 // Status list on the setup card: is everything connected?
@@ -408,6 +437,31 @@ static void update_card_info(void)
     info_row(4, OFF, T->info_up_fmt, span);
 }
 
+static bool s_night_effective;   // night mode is on now (by the hours or forced from the card)
+static bool s_force_night;       // turned on from the card
+static bool s_skip_night;        // turned off from the card for the rest of tonight's hours
+static time_t s_force_since;
+#define FORCE_MAX_S    (12 * 3600)   // a forced night ends by itself after 12 h
+static void render_night_card(int aw)
+{
+    label_fmt(s_msg_title, LV_SYMBOL_EYE_CLOSE "  %s", T->night_card_title);
+    lv_obj_set_style_text_color(s_msg_title, COLOR_NIGHT, 0);
+    lv_label_set_text(s_msg_when, "");
+    lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_remove_flag(s_card_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(s_card_img, LV_ALIGN_CENTER, 0, (s_msg_top - MSG_BOTTOM) / 2 - 22);
+    lv_obj_set_style_transform_scale(s_msg_label, 256, 0);
+    lv_obj_set_style_text_font(s_msg_label, &font_pt_20, 0);
+    lv_label_set_long_mode(s_msg_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(s_msg_label, aw, LV_SIZE_CONTENT);
+    lv_label_set_text(s_msg_label, s_night_effective ? T->night_card_on : T->night_card_off);
+    lv_obj_set_style_text_color(s_msg_label, s_night_effective ? COLOR_NIGHT : lv_color_white(), 0);
+    lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (s_msg_top - MSG_BOTTOM) / 2 + 24);
+    lv_label_set_text(s_msg_hint, T->night_card_hint);
+    lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void render_message(void)
 {
     if (!s_msg_panel) {
@@ -415,7 +469,12 @@ static void render_message(void)
     }
     int w = lv_display_get_horizontal_resolution(NULL);
     int h = lv_display_get_vertical_resolution(NULL);
-    int aw = w - 24, ah = h - MSG_TOP - MSG_BOTTOM;
+    int aw = w - 24, ah = h - s_msg_top - MSG_BOTTOM;
+    if (s_card && s_card_night) {
+        render_night_card(aw);
+        return;
+    }
+    lv_obj_add_flag(s_card_img, LV_OBJ_FLAG_HIDDEN);
     if (s_card) {
         // last stop of the browse sequence: open the setup page on the home network
         label_fmt(s_msg_title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
@@ -423,7 +482,7 @@ static void render_message(void)
         lv_label_set_text(s_msg_when, "");
 
         // split: a big gear on the side of the USB edge (where the button is), status on the other
-        int ch = h - MSG_TOP - MSG_BOTTOM;
+        int ch = h - s_msg_top - MSG_BOTTOM;
         int usb = 0;   // 0 bottom, 1 left, 2 top, 3 right
         for (int i = 0; i < 4; i++) {
             if (BOARD_USB_TO_ROT[i] == lv_display_get_rotation(NULL)) {
@@ -436,10 +495,10 @@ static void render_message(void)
         if (landscape) {
             gw = CARD_GEAR, gh = ch, iw = w - CARD_GEAR - 16, ih = ch;
             gx = gear_first ? 0 : w - CARD_GEAR, ix = gear_first ? CARD_GEAR : 8;
-            gy = iy = MSG_TOP;
+            gy = iy = s_msg_top;
         } else {
             gw = w, gh = CARD_GEAR, iw = w - 20, ih = ch - CARD_GEAR;
-            gy = gear_first ? MSG_TOP : h - MSG_BOTTOM - CARD_GEAR, iy = gear_first ? MSG_TOP + CARD_GEAR : MSG_TOP + 4;
+            gy = gear_first ? s_msg_top : h - MSG_BOTTOM - CARD_GEAR, iy = gear_first ? s_msg_top + CARD_GEAR : s_msg_top + 4;
             gx = 0, ix = 10;
         }
         lv_obj_set_style_text_font(s_msg_label, &font_pt_28, 0);
@@ -487,7 +546,7 @@ static void render_message(void)
     lv_label_set_long_mode(s_msg_label, font ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
     lv_obj_set_size(s_msg_label, aw, font ? LV_SIZE_CONTENT : ah);
     lv_label_set_text(s_msg_label, m->text);
-    lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (MSG_TOP - MSG_BOTTOM) / 2);
+    lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (s_msg_top - MSG_BOTTOM) / 2);
 
     if (m->when > 0) {
         struct tm t, today;
@@ -513,16 +572,17 @@ static void render_message(void)
 }
 
 // Pages over the dashboard (top layer): messages/setup card, sensor pages, other cities
-enum { OV_NONE, OV_MSG, OV_SENS, OV_CITY };
+enum { OV_NONE, OV_MSG, OV_SENS, OV_CITY, OV_WX };
 
 static int overlay_now(void)
 {
-    return s_idx >= 0 || s_card ? OV_MSG : s_sens >= 0 ? OV_SENS : s_city >= 0 ? OV_CITY : OV_NONE;
+    return s_idx >= 0 || s_card ? OV_MSG : s_sens >= 0 ? OV_SENS : s_city >= 0 ? OV_CITY : s_wx_page ? OV_WX : OV_NONE;
 }
 
 static lv_obj_t *overlay_obj(int ov)
 {
-    return ov == OV_MSG ? s_msg_panel : ov == OV_SENS ? s_sens_panel : ov == OV_CITY ? s_city_panel : NULL;
+    return ov == OV_MSG ? s_msg_panel : ov == OV_SENS ? s_sens_panel : ov == OV_CITY ? s_city_panel :
+           ov == OV_WX ? s_wx_panel : NULL;
 }
 
 // Shows overlay "next" (already rendered) after "prev": fades over the dashboard, cuts between pages
@@ -535,7 +595,7 @@ static void present(int prev, int next)
         }
         return;
     }
-    for (int ov = OV_MSG; ov <= OV_CITY; ov++) {
+    for (int ov = OV_MSG; ov <= OV_WX; ov++) {
         if (ov != next && overlay_obj(ov)) {
             lv_obj_add_flag(overlay_obj(ov), LV_OBJ_FLAG_HIDDEN);
         }
@@ -553,9 +613,11 @@ static void show(int idx)
 {
     int prev = overlay_now();
     s_card = false;
+    s_card_night = false;
     s_idx = idx;
     s_sens = -1;
     s_city = -1;
+    s_wx_page = false;
     if (!s_msg_panel) {
         return;
     }
@@ -589,6 +651,7 @@ static void show_card(void)
     s_card = true;
     s_sens = -1;
     s_city = -1;
+    s_wx_page = false;
     if (!s_msg_panel) {
         return;
     }
@@ -697,8 +760,10 @@ static void show_sensors(int page)
     int prev = overlay_now();
     s_idx = -1;
     s_card = false;
+    s_card_night = false;
     s_sens = page;
     s_city = -1;
+    s_wx_page = false;
     if (!s_sens_panel) {
         return;
     }
@@ -742,18 +807,30 @@ static void build_message_panel(int w, int h)
     lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
 
+    // landscape: title and date/time on one row; portrait: the date/time on a line of its own.
+    // A title that doesn't fit ("Message 2/3 · new") scrolls.
+    bool tall = h > w;
+    s_msg_top = tall ? MSG_TOP_TALL : MSG_TOP;
     s_msg_title = label(s_msg_panel, &font_pt_14, COLOR_ACCENT);
+    scroll_line(s_msg_title, tall ? w - 20 : w - 100);
     lv_obj_set_pos(s_msg_title, 10, 8);
     s_msg_when = label(s_msg_panel, &font_pt_12, COLOR_MUTED);
-    lv_obj_align(s_msg_when, LV_ALIGN_TOP_RIGHT, -10, 10);
+    if (tall) {
+        lv_obj_set_pos(s_msg_when, 10, 28);
+    } else {
+        lv_obj_align(s_msg_when, LV_ALIGN_TOP_RIGHT, -10, 10);
+    }
 
     lv_obj_t *bar = lv_obj_create(s_msg_panel);
     lv_obj_remove_style_all(bar);
     lv_obj_set_size(bar, w - 20, 2);
-    lv_obj_set_pos(bar, 10, 30);
+    lv_obj_set_pos(bar, 10, s_msg_top - 6);
     lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
 
+    s_card_img = lv_image_create(s_msg_panel);
+    lv_image_set_src(s_card_img, &EMOJI_BIG[EMOJI_BIG_MOON]);
+    lv_obj_add_flag(s_card_img, LV_OBJ_FLAG_HIDDEN);
     s_msg_label = label(s_msg_panel, &font_pt_20, lv_color_white());
     lv_obj_set_style_text_align(s_msg_label, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -771,8 +848,9 @@ static void build_message_panel(int w, int h)
         s_info_dot[i] = dot(row, 9, COLOR_MUTED);
         lv_obj_align(s_info_dot[i], LV_ALIGN_LEFT_MID, 0, 0);
         s_info_txt[i] = label(row, &font_pt_14, lv_color_white());
-        lv_label_set_long_mode(s_info_txt[i], LV_LABEL_LONG_DOT);
-        lv_obj_set_size(s_info_txt[i], lv_pct(92), lv_font_get_line_height(&font_pt_14));
+        // long lines (portrait, Spanish...) scroll instead of ending in "..."
+        lv_label_set_long_mode(s_info_txt[i], LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        lv_obj_set_size(s_info_txt[i], lv_pct(90), lv_font_get_line_height(&font_pt_14));
         lv_obj_align(s_info_txt[i], LV_ALIGN_LEFT_MID, 14, 0);
     }
     lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
@@ -794,8 +872,8 @@ static void build_message_panel(int w, int h)
     // "deleted" notice: big trash can over the message
     s_del_done = lv_obj_create(s_msg_panel);
     lv_obj_remove_style_all(s_del_done);
-    lv_obj_set_size(s_del_done, w, h - MSG_TOP);
-    lv_obj_set_pos(s_del_done, 0, MSG_TOP);
+    lv_obj_set_size(s_del_done, w, h - s_msg_top);
+    lv_obj_set_pos(s_del_done, 0, s_msg_top);
     lv_obj_set_style_bg_color(s_del_done, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_del_done, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(s_del_done, LV_FLEX_FLOW_COLUMN);
@@ -812,6 +890,179 @@ static void build_message_panel(int w, int h)
     if (s_idx >= 0 || s_card) {
         render_message();
         lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// ---------- weather details ----------
+
+static bool wx_available(void)
+{
+    return s_wx_on && s_has_weather;
+}
+
+// colored pill: "3  moderate"
+static lv_obj_t *pill(lv_obj_t *parent, uint32_t color, const char *text)
+{
+    lv_obj_t *p = lv_obj_create(parent);
+    lv_obj_remove_style_all(p);
+    lv_obj_set_size(p, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(p, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(p, 6, 0);
+    lv_obj_set_style_pad_hor(p, 6, 0);
+    lv_obj_set_style_pad_ver(p, 1, 0);
+    lv_obj_t *l = label(p, &font_pt_14, lv_color_hex(0x0b0f1a));
+    lv_label_set_text(l, text);
+    return p;
+}
+
+// small muted name, and below it the value with an optional pill (fits a 160 px column)
+static void wx_row(lv_obj_t *parent, int x, int y, const char *name, const char *value, uint32_t color, const char *pill_text)
+{
+    lv_obj_t *n = label(parent, &font_pt_12, COLOR_MUTED);
+    lv_label_set_text(n, name);
+    lv_obj_set_pos(n, x, y);
+    lv_obj_t *v = label(parent, &font_pt_20, lv_color_white());
+    lv_label_set_text(v, value);
+    lv_obj_set_pos(v, x, y + 14);
+    if (pill_text) {
+        lv_obj_t *p = pill(parent, color, pill_text);
+        lv_obj_update_layout(v);
+        lv_obj_align_to(p, v, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+    }
+}
+
+/*
+ * Landscape: feels like / UV / air on the left, rain chance per hour on the right.
+ * Portrait: the three rows on top, the rain chart below.
+ */
+static void render_wx(void)
+{
+    if (!s_wx_panel || !s_wx_page || !s_has_weather) {
+        return;
+    }
+    lv_obj_clean(s_wx_panel);
+    const weather_t *w = &s_weather;
+    int sw = lv_display_get_horizontal_resolution(NULL);
+    int sh = lv_display_get_vertical_resolution(NULL);
+    bool landscape = sw > sh;
+
+    lv_obj_t *title = label(s_wx_panel, &font_pt_14, COLOR_ACCENT);
+    scroll_line(title, sw - 20);
+    label_fmt(title, LV_SYMBOL_GPS "  %s \xC2\xB7 %s", T->wx_title, g_cfg.city);
+    lv_obj_set_pos(title, 10, 8);
+    lv_obj_t *bar = lv_obj_create(s_wx_panel);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, sw - 20, 2);
+    lv_obj_set_pos(bar, 10, 30);
+    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
+
+    // UV (WHO scale) and European AQI bands with their usual colors
+    static const uint32_t UV_COLOR[] = {0x4caf50, 0xfdd835, 0xff9800, 0xf44336, 0xab47bc};
+    static const uint32_t AQI_COLOR[] = {0x50f0e6, 0x50ccaa, 0xf0e641, 0xff5050, 0xd04070, 0xab47bc};
+    float uv = w->uv > 0.4f ? w->uv : w->uv_max;   // at night show today's max instead of 0
+    int uvi = (int)(uv + 0.5f);
+    int uvl = uvi <= 2 ? 0 : uvi <= 5 ? 1 : uvi <= 7 ? 2 : uvi <= 10 ? 3 : 4;
+    int aql = w->aqi < 0 ? -1 : w->aqi <= 20 ? 0 : w->aqi <= 40 ? 1 : w->aqi <= 60 ? 2 : w->aqi <= 80 ? 3 :
+              w->aqi <= 100 ? 4 : 5;
+
+    char v[24], name[48];
+    int x = 10, y = 38, step = 42;
+    snprintf(v, sizeof(v), "%.0f" DEG, temp_unit(w->feels));
+    wx_row(s_wx_panel, x, y, T->wx_feels, v, 0, NULL);
+    snprintf(v, sizeof(v), "%d", uvi);
+    if (w->uv <= 0.4f) {   // night: the number is today's max, say so
+        snprintf(name, sizeof(name), "%s \xC2\xB7 ", T->wx_uv);
+        size_t l = strlen(name);
+        strlcpy(name + l, T->wx_uv_max_fmt, sizeof(name) - l);
+    } else {
+        strlcpy(name, T->wx_uv, sizeof(name));
+    }
+    wx_row(s_wx_panel, x, y + step, name, v, UV_COLOR[uvl], T->uv_level[uvl]);
+    if (aql >= 0) {
+        snprintf(v, sizeof(v), "%d", w->aqi);
+        wx_row(s_wx_panel, x, y + 2 * step, T->wx_air, v, AQI_COLOR[aql], T->aqi_level[aql]);
+    }
+
+    // rain chance per hour: bar chart
+    int cx = landscape ? 160 : 10, cy = landscape ? 40 : 172;
+    int cw = landscape ? sw - cx - 10 : sw - 20, ch = landscape ? sh - cy - 6 : sh - cy - 8;
+    lv_obj_t *rt = label(s_wx_panel, &font_pt_12, COLOR_MUTED);
+    lv_label_set_text(rt, T->wx_rain);
+    lv_obj_set_pos(rt, cx, cy);
+    int n = w->n_rain, gap = 4;
+    if (n <= 0) {
+        return;
+    }
+    gap += landscape ? 1 : 2;
+    int bw = (cw - gap * (n - 1)) / n;
+    int top = cy + 18 + 16, bottom = cy + ch - 18;   // room for the % above and the hour below
+    int best = 0;
+    for (int i = 1; i < n; i++) {
+        if (w->rain_pct[i] > w->rain_pct[best]) {
+            best = i;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        int pct = w->rain_pct[i] < 0 ? 0 : w->rain_pct[i] > 100 ? 100 : w->rain_pct[i];
+        int bh = LV_MAX(3, (bottom - top) * pct / 100);
+        int bx = cx + i * (bw + gap);
+        lv_obj_t *b = lv_obj_create(s_wx_panel);
+        lv_obj_remove_style_all(b);
+        lv_obj_set_size(b, bw, bh);
+        lv_obj_set_pos(b, bx, bottom - bh);
+        lv_obj_set_style_radius(b, 3, 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(pct >= 50 ? 0x1e88e5 : 0x42a5f5), 0);
+        lv_obj_set_style_bg_opa(b, pct >= 20 ? LV_OPA_COVER : LV_OPA_50, 0);
+
+        // % above the bar and the hour below, each as wide as its text and centered on the bar
+        lv_obj_t *pl = label(s_wx_panel, &font_pt_12, i == best && pct > 0 ? lv_color_white() : COLOR_MUTED);
+        label_fmt(pl, "%d", pct);
+        lv_obj_update_layout(pl);
+        lv_obj_set_pos(pl, bx + (bw - lv_obj_get_width(pl)) / 2, bottom - bh - 15);
+
+        int hr = w->rain_hour[i];
+        lv_obj_t *hl = label(s_wx_panel, &font_pt_12, COLOR_MUTED);
+        if (g_cfg.h12) {
+            label_fmt(hl, "%d%c", hr % 12 ? hr % 12 : 12, hr < 12 ? 'a' : 'p');
+        } else {
+            label_fmt(hl, "%d", hr);
+        }
+        lv_obj_update_layout(hl);
+        lv_obj_set_pos(hl, bx + (bw - lv_obj_get_width(hl)) / 2, bottom + 2);
+    }
+}
+
+static void show_wx(void)
+{
+    int prev = overlay_now();
+    s_idx = -1;
+    s_card = false;
+    s_card_night = false;
+    s_sens = -1;
+    s_city = -1;
+    s_wx_page = true;
+    if (!s_wx_panel) {
+        return;
+    }
+    render_wx();
+    present(prev, OV_WX);
+}
+
+static void build_wx_panel(int w, int h)
+{
+    s_wx_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_wx_panel);
+    lv_obj_set_size(s_wx_panel, w, h);
+    lv_obj_set_style_bg_color(s_wx_panel, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_wx_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_wx_panel, LV_OBJ_FLAG_SCROLLABLE);
+    if (s_wx_page && wx_available()) {
+        render_wx();
+    } else {
+        s_wx_page = false;
+        lv_obj_add_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -858,7 +1109,7 @@ static void render_city(void)
     bool landscape = w > h;
 
     lv_obj_t *title = label(s_city_panel, &font_pt_14, COLOR_ACCENT);
-    one_line(title, w - 20);
+    scroll_line(title, w - 20);
     label_fmt(title, LV_SYMBOL_GPS "  %s", c->name);
     lv_obj_set_pos(title, 10, 8);
     lv_obj_t *bar = lv_obj_create(s_city_panel);
@@ -935,8 +1186,10 @@ static void show_city(int i)
     int prev = overlay_now();
     s_idx = -1;
     s_card = false;
+    s_card_night = false;
     s_sens = -1;
     s_city = i;
+    s_wx_page = false;
     if (!s_city_panel) {
         return;
     }
@@ -979,29 +1232,33 @@ void ui_set_cities(const city_wx_t *c, int n)
     }
 }
 
-// Normal cycle: dashboard, other cities, sensor pages, then each active message.
+// Normal cycle: dashboard, weather details, other cities, sensor pages, then each active message.
 // Position: -1 dashboard, then cities, sensor pages and messages in a row.
 static int cycle_pos(void)
 {
-    int nc = s_ncities, np = sens_pages();
-    return s_city >= 0 ? s_city : s_sens >= 0 ? nc + s_sens : s_idx >= 0 ? nc + np + s_idx : -1;
+    int nw = wx_available(), nc = s_ncities, np = sens_pages();
+    return s_wx_page ? 0 : s_city >= 0 ? nw + s_city : s_sens >= 0 ? nw + nc + s_sens :
+           s_idx >= 0 ? nw + nc + np + s_idx : -1;
 }
 
 static void show_pos(int p)
 {
-    int nc = s_ncities, np = sens_pages();
+    int nw = wx_available(), nc = s_ncities, np = sens_pages();
     if (p < 0) {
         s_left = s_dash_s;
         show(-1);
-    } else if (p < nc) {
+    } else if (p < nw) {
+        s_left = s_wx_s;
+        show_wx();
+    } else if (p < nw + nc) {
         s_left = s_city_s;
-        show_city(p);
-    } else if (p < nc + np) {
+        show_city(p - nw);
+    } else if (p < nw + nc + np) {
         s_left = s_sens_s;
-        show_sensors(p - nc);
+        show_sensors(p - nw - nc);
     } else {
         s_left = s_msg_s;
-        show(p - nc - np);
+        show(p - nw - nc - np);
     }
 }
 
@@ -1016,7 +1273,7 @@ static void message_cycle(void)
         }
         return;
     }
-    int total = s_ncities + sens_pages() + s_n;
+    int total = wx_available() + s_ncities + sens_pages() + s_n;
     if (total == 0) {
         if (overlay_now() != OV_NONE) {
             show(-1);
@@ -1049,6 +1306,7 @@ static void poll_cb(lv_timer_t *t)
     }
     refresh_items();
     if ((ev & MSG_EV_NEW) && s_n > 0) {
+        night_wake(WAKE_MSG_S);
         if (!s_browse && !s_deleting) {
             s_left = MSG_NEW_S;
             show(0);
@@ -1076,6 +1334,11 @@ bool ui_browse_next(void)
     if (s_config_mode || !s_msg_panel || s_deleting) {
         return false;
     }
+    if (s_night) {   // at night the first click only wakes the panel up
+        night_wake(WAKE_CLICK_S);
+        return true;
+    }
+    s_wake_left = LV_MAX(s_wake_left, WAKE_CLICK_S);   // keep it awake while browsing
     refresh_items();
     // sequence: message 1 .. message n, setup card, back to the dashboard
     if (!s_browse) {
@@ -1086,6 +1349,12 @@ bool ui_browse_next(void)
         } else {
             show_card();
         }
+        return true;
+    }
+    if (s_card && !s_card_night) {   // setup card -> night-mode card
+        s_browse_left = BROWSE_S;
+        s_card_night = true;
+        render_message();
         return true;
     }
     if (s_card) {
@@ -1107,7 +1376,7 @@ ui_hold_t ui_hold_action(void)
         return UI_HOLD_NONE;
     }
     if (s_card) {
-        return UI_HOLD_LAN_SETUP;
+        return s_card_night ? UI_HOLD_NIGHT : UI_HOLD_LAN_SETUP;
     }
     return s_idx >= 0 && s_idx < s_n ? UI_HOLD_DELETE : UI_HOLD_NONE;
 }
@@ -1118,8 +1387,11 @@ void ui_hold_progress(int percent)
         return;
     }
     // red on a message (delete), blue on the setup card (open)
-    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card ? 0x4fc3f7 : 0xff4d4f), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card ? 0x16324a : 0x3a1d24), LV_PART_MAIN);
+    // amber on the night-mode card
+    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card_night ? 0xc8823c : s_card ? 0x4fc3f7 : 0xff4d4f),
+                              LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_del_bar, lv_color_hex(s_card_night ? 0x33240f : s_card ? 0x16324a : 0x3a1d24),
+                              LV_PART_MAIN);
     if (percent < 0) {
         lv_obj_add_flag(s_del_bar, LV_OBJ_FLAG_HIDDEN);
         if (s_browse) {
@@ -1162,6 +1434,163 @@ void ui_delete_selected(void)
     lv_timer_set_repeat_count(t, 1);
 }
 
+// ---------- night mode ----------
+
+static bool night_hours(const struct tm *tm)
+{
+    int h = tm->tm_hour;
+    return s_night_from <= s_night_to ? h >= s_night_from && h < s_night_to : h >= s_night_from || h < s_night_to;
+}
+
+// Landscape: "03:47" across the screen and the date below. Portrait: hours above minutes.
+// Digits only in the 100 px font; AM/PM goes with the date.
+static void night_text(const struct tm *tm)
+{
+    if (!s_night_time) {
+        return;
+    }
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    bool landscape = w > h;
+    int hour = g_cfg.h12 ? (tm->tm_hour % 12 ? tm->tm_hour % 12 : 12) : tm->tm_hour;
+    const char *hfmt = g_cfg.h12 ? "%d" : "%02d";
+    char hh[4];
+    snprintf(hh, sizeof(hh), hfmt, hour);
+    if (landscape) {
+        label_fmt(s_night_time, "%s:%02d", hh, tm->tm_min);
+        lv_label_set_text(s_night_min, "");
+    } else {
+        lv_label_set_text(s_night_time, hh);
+        label_fmt(s_night_min, "%02d", tm->tm_min);
+    }
+    char date[48];
+    if (T->month_first) {
+        snprintf(date, sizeof(date), "%s, %s %d", T->days[tm->tm_wday], T->months[tm->tm_mon], tm->tm_mday);
+    } else {
+        snprintf(date, sizeof(date), "%s, %d %s", T->days[tm->tm_wday], tm->tm_mday, T->months[tm->tm_mon]);
+    }
+    if (g_cfg.h12) {
+        label_fmt(s_night_date, "%s  \xC2\xB7  %s", date, tm->tm_hour < 12 ? "AM" : "PM");
+    } else {
+        lv_label_set_text(s_night_date, date);
+    }
+
+    if (landscape) {
+        lv_obj_align(s_night_time, LV_ALIGN_CENTER, 0, -22);
+        lv_obj_align(s_night_date, LV_ALIGN_CENTER, 0, 46);
+    } else {
+        lv_obj_align(s_night_time, LV_ALIGN_CENTER, 0, -70);
+        lv_obj_align(s_night_min, LV_ALIGN_CENTER, 0, 18);
+        lv_obj_align(s_night_date, LV_ALIGN_CENTER, 0, 100);
+    }
+}
+
+static void build_night_panel(int w, int h)
+{
+    s_night_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_night_panel);
+    lv_obj_set_size(s_night_panel, w, h);
+    lv_obj_set_style_bg_color(s_night_panel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_night_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_night_panel, LV_OBJ_FLAG_SCROLLABLE);
+    // big enough to read half asleep, from across the room
+    s_night_time = label(s_night_panel, &font_clock_100, COLOR_NIGHT);
+    s_night_min = label(s_night_panel, &font_clock_100, COLOR_NIGHT);
+    s_night_date = label(s_night_panel, w > h ? &font_pt_28 : &font_pt_20, lv_color_hex(0x9a6a38));
+    lv_obj_set_style_text_align(s_night_date, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_night_date, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_night_date, w - 12);
+    if (!s_night) {
+        lv_obj_add_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// A scheduled message nobody has read yet (e.g. "take the medicine") keeps the panel awake and the
+// LED blinking until it's opened, deleted or its time is over. Direct messages only wake it briefly.
+static bool sched_unread(void)
+{
+    for (int i = 0; i < s_n; i++) {
+        if (s_items[i].scheduled && s_items[i].unread) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Called every second: night clock on/off by the hours, unless something woke the panel up
+static void night_tick(const struct tm *tm, bool clock_ok)
+{
+    if (s_wake_left > 0) {
+        s_wake_left--;
+    }
+    bool scheduled = s_night_on && clock_ok && night_hours(tm);
+    if (!scheduled) {
+        s_skip_night = false;   // "off for tonight" ends with the night hours
+    }
+    if (s_force_night && time(NULL) - s_force_since > FORCE_MAX_S) {
+        s_force_night = false;  // forgotten: give the panel back
+    }
+    bool night = (scheduled && !s_skip_night) || s_force_night;
+    if (night != s_night_effective) {
+        s_night_effective = night;
+        if (s_card_night) {
+            render_message();
+        }
+    }
+    bool reminder = night && sched_unread();
+    led_set_urgent(reminder);   // a reminder at night: red breathing instead of the white blink
+    bool want = night && s_wake_left == 0 && !s_lan && !s_browse && !s_deleting && !reminder;
+    if (want != s_night && s_night_panel) {
+        s_night = want;
+        led_set_quiet(want);
+        if (want) {
+            lv_obj_remove_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_fade_in(s_night_panel, 600, 0);
+        } else {
+            lv_obj_add_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (s_night) {
+        night_text(tm);
+    }
+}
+
+// Something to see at night (new message, click): show the normal panel for a while
+static void night_wake(int seconds)
+{
+    if (s_wake_left < seconds) {
+        s_wake_left = seconds;
+    }
+    if (s_night && s_night_panel) {
+        s_night = false;
+        led_set_quiet(false);
+        lv_obj_add_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Hold on the night-mode card: on now (a nap) or off (for the rest of tonight's hours)
+void ui_night_toggle(void)
+{
+    if (s_night_effective) {
+        s_force_night = false;
+        s_skip_night = true;
+        s_night_effective = false;
+    } else {
+        s_force_night = true;
+        s_force_since = time(NULL);
+        s_skip_night = false;
+        s_night_effective = true;
+        s_wake_left = 0;
+    }
+    render_message();       // the card shows the new state for a moment...
+    s_browse_left = 2;      // ...then back to normal, and the night clock comes up if it's on
+}
+
+bool ui_night_active(void)
+{
+    return s_night;
+}
+
 static void sig_sweep_cb(lv_timer_t *t)
 {
     if (s_config_mode || !s_sig || s_sig_sweep < 0) {
@@ -1179,7 +1608,7 @@ static void tick_cb(lv_timer_t *t)
         return;
     }
     message_cycle();
-    if (s_card) {
+    if (s_card && !s_card_night) {
         update_card_info();
     }
     city_time_text();
@@ -1187,6 +1616,7 @@ static void tick_cb(lv_timer_t *t)
     struct tm tm;
     localtime_r(&now, &tm);
 
+    night_tick(&tm, tm.tm_year >= (2024 - 1900));
     if (tm.tm_year >= (2024 - 1900)) {
         big_clock(s_time, s_ampm, tm.tm_hour, tm.tm_min);   // AM/PM above the seconds
         label_fmt(s_sec, "%02d", tm.tm_sec);
@@ -1309,6 +1739,9 @@ static void build(void)
     s_city_panel = NULL;
     s_city_time = NULL;
     s_city_ampm = NULL;
+    s_wx_panel = NULL;
+    s_night_panel = NULL;
+    s_night_time = s_night_min = s_night_date = NULL;
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
 
@@ -1379,6 +1812,8 @@ static void build(void)
     build_message_panel(w, h);
     build_sensor_panel(w, h);
     build_city_panel(w, h);
+    build_wx_panel(w, h);
+    build_night_panel(w, h);
     s_lan_panel = NULL;   // lv_layer_top was cleaned above
     s_lan_msg = NULL;
     if (s_lan) {
@@ -1394,6 +1829,11 @@ void ui_init(bool config_mode)
     s_sens_s = config_get_u8_def("t_sens", CYCLE_DEFAULT_S);
     s_msg_s = config_get_u8_def("t_msg", CYCLE_DEFAULT_S);
     s_city_s = config_get_u8_def("t_city", CYCLE_DEFAULT_S);
+    s_wx_s = config_get_u8_def("t_wx", CYCLE_DEFAULT_S);
+    s_wx_on = config_get_u8_def("wx_on", 1);
+    s_night_on = config_get_u8("night_on");
+    s_night_from = config_get_u8_def("night_from", NIGHT_DEFAULT_FROM) % 24;
+    s_night_to = config_get_u8_def("night_to", NIGHT_DEFAULT_TO) % 24;
     s_left = s_dash_s;
     strlcpy(s_status_text, T->starting, sizeof(s_status_text));
     build();
@@ -1443,6 +1883,7 @@ void ui_set_weather(const weather_t *w)
     s_has_weather = true;
     render_current();
     render_forecast();
+    render_wx();
 }
 
 void ui_set_fahrenheit(bool on)
@@ -1458,6 +1899,7 @@ void ui_set_fahrenheit(bool on)
     render_forecast();
     render_sensors();
     render_city();
+    render_wx();
 }
 
 // ---------- setup page on the home network ----------
