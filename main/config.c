@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include <string.h>
+#include <stdio.h>
 #include "nvs.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
@@ -22,6 +23,30 @@ static bool has_key(nvs_handle_t nvs, const char *key)
 {
     size_t len = 0;
     return nvs_get_str(nvs, key, NULL, &len) == ESP_OK;
+}
+
+// "Munich, Florianópolis" typed as the main city: the first one stays, the rest become other cities.
+// Returns true if it changed something.
+bool config_split_city(void)
+{
+    char *comma = strpbrk(g_cfg.city, ",;");
+    if (!comma) {
+        return false;
+    }
+    char rest[sizeof(g_cfg.city)];
+    strlcpy(rest, comma + 1, sizeof(rest));
+    *comma = '\0';
+    for (char *e = g_cfg.city + strlen(g_cfg.city); e > g_cfg.city && e[-1] == ' '; *--e = '\0') {
+    }
+    char cities[sizeof(g_cfg.cities)];
+    strlcpy(cities, rest + strspn(rest, " "), sizeof(cities));
+    if (g_cfg.cities[0]) {
+        strlcat(cities, ", ", sizeof(cities));
+        strlcat(cities, g_cfg.cities, sizeof(cities));
+    }
+    strlcpy(g_cfg.cities, cities, sizeof(g_cfg.cities));
+    g_cfg.lat[0] = g_cfg.lon[0] = '\0';   // look the main city up again
+    return true;
 }
 
 void config_load(void)
@@ -52,7 +77,14 @@ void config_load(void)
     get_str(nvs, "tg_token", g_cfg.tg_token, sizeof(g_cfg.tg_token));
     nvs_get_i64(nvs, "tg_owner", &g_cfg.tg_owner);
     get_str(nvs, "govee_key", g_cfg.govee_key, sizeof(g_cfg.govee_key));
+    get_str(nvs, "cities", g_cfg.cities, sizeof(g_cfg.cities));
+    uint8_t h12 = 0;
+    nvs_get_u8(nvs, "h12", &h12);
+    g_cfg.h12 = h12;
     nvs_close(nvs);
+    if (config_split_city()) {
+        config_save();
+    }
 }
 
 void config_save(void)
@@ -70,8 +102,18 @@ void config_save(void)
     nvs_set_str(nvs, "tg_token", g_cfg.tg_token);
     nvs_set_i64(nvs, "tg_owner", g_cfg.tg_owner);
     nvs_set_str(nvs, "govee_key", g_cfg.govee_key);
+    nvs_set_str(nvs, "cities", g_cfg.cities);
     nvs_commit(nvs);
     nvs_close(nvs);
+}
+
+void clock_fmt(char *out, size_t size, int hour, int min)
+{
+    if (g_cfg.h12) {
+        snprintf(out, size, "%d:%02d %s", hour % 12 ? hour % 12 : 12, min, hour < 12 ? "AM" : "PM");
+    } else {
+        snprintf(out, size, "%02d:%02d", hour, min);
+    }
 }
 
 uint8_t config_get_u8(const char *key)

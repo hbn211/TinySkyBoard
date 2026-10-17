@@ -2,6 +2,7 @@
 #include "config.h"
 #include "i18n.h"
 #include "schedule.h"
+#include "emoji/emoji.h"
 
 #include <string.h>
 #include <strings.h>
@@ -71,15 +72,18 @@ static void reply(int64_t chat_id, const char *text)
 // Telegram "/" menu with the commands in the panel's language
 static void set_commands(void)
 {
-    static const char *const CMDS[LANG_COUNT][6][2] = {
-        [LANG_PT] = {{"agendar", "Programar uma mensagem"}, {"agenda", "Ver o que está agendado"},
-                     {"cancelar", "Apagar um agendamento: /cancelar N"}, {"limpar", "Tirar a mensagem do painel"},
+    static const char *const CMDS[LANG_COUNT][7][2] = {
+        [LANG_PT] = {{"mensagens", "Mensagens na tela e se foram lidas"},
+                     {"agendar", "Programar uma mensagem"}, {"agenda", "Ver o que está agendado"},
+                     {"cancelar", "Apagar um agendamento: /cancelar N"}, {"limpar", "Apagar as mensagens enviadas (não as agendadas)"},
                      {"status", "Ver se o painel está ligado"}, {"ajuda", "Ajuda"}},
-        [LANG_EN] = {{"schedule", "Schedule a message"}, {"list", "See what is scheduled"},
-                     {"cancel", "Delete a schedule: /cancel N"}, {"clear", "Remove the message from the panel"},
+        [LANG_EN] = {{"messages", "Messages on the panel and whether they were read"},
+                     {"schedule", "Schedule a message"}, {"list", "See what is scheduled"},
+                     {"cancel", "Delete a schedule: /cancel N"}, {"clear", "Delete the sent messages (not the scheduled ones)"},
                      {"status", "Check that the panel is on"}, {"help", "Help"}},
-        [LANG_ES] = {{"programar", "Programar un mensaje"}, {"lista", "Ver lo programado"},
-                     {"cancelar", "Borrar una programación: /cancelar N"}, {"borrar", "Quitar el mensaje del panel"},
+        [LANG_ES] = {{"mensajes", "Mensajes en el panel y si se leyeron"},
+                     {"programar", "Programar un mensaje"}, {"lista", "Ver lo programado"},
+                     {"cancelar", "Borrar una programación: /cancelar N"}, {"borrar", "Borrar los mensajes enviados (no los programados)"},
                      {"estado", "Ver si el panel está encendido"}, {"ayuda", "Ayuda"}},
     };
     int lang = 0;
@@ -90,7 +94,7 @@ static void set_commands(void)
     }
     cJSON *body = cJSON_CreateObject();
     cJSON *list = cJSON_AddArrayToObject(body, "commands");
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         cJSON *c = cJSON_CreateObject();
         cJSON_AddStringToObject(c, "command", CMDS[lang][i][0]);
         cJSON_AddStringToObject(c, "description", CMDS[lang][i][1]);
@@ -106,12 +110,16 @@ static void set_commands(void)
 
 // ---------- text ----------
 
-// Keeps only what the panel fonts can draw (ASCII + Latin-1 + quotes/dashes/ellipsis).
-// Emoji and other symbols are dropped.
-static void sanitize(const char *in, char *out, size_t size)
+// Keeps only what the panel fonts can draw (ASCII + Latin-1 + quotes/dashes/ellipsis + the color
+// emoji in main/emoji). Returns how many characters were dropped. Variation selectors and skin tones
+// are left out without counting (the emoji shows in its default look); in combined emoji
+// (joined with ZWJ) only the first one stays.
+static int sanitize(const char *in, char *out, size_t size)
 {
     const unsigned char *p = (const unsigned char *)in;
     size_t o = 0;
+    int dropped = 0;
+    bool joined = false;   // the previous character was a ZWJ: skip this one too
     while (*p && o + 4 < size) {
         uint32_t cp;
         int n;
@@ -136,12 +144,21 @@ static void sanitize(const char *in, char *out, size_t size)
             }
             cp = (cp << 6) | (p[i] & 0x3f);
         }
+        bool silent = cp == 0xFE0F || cp == 0x200D || (cp >= 0x1F3FB && cp <= 0x1F3FF);
         bool keep = cp == '\n' || (cp >= 0x20 && cp <= 0x7e) || (cp >= 0xa0 && cp <= 0xff) ||
                     cp == 0x2013 || cp == 0x2014 || cp == 0x2018 || cp == 0x2019 ||
-                    cp == 0x201c || cp == 0x201d || cp == 0x2022 || cp == 0x2026 || cp == 0x20ac;
+                    cp == 0x201c || cp == 0x201d || cp == 0x2022 || cp == 0x2026 || cp == 0x20ac ||
+                    emoji_known(cp);
+        if (joined) {
+            keep = false;
+            silent = true;
+        }
+        joined = cp == 0x200D;
         if (keep) {
             memcpy(out + o, p, n);
             o += n;
+        } else if (!silent && cp) {
+            dropped++;
         }
         p += n;
     }
@@ -153,6 +170,7 @@ static void sanitize(const char *in, char *out, size_t size)
     }
     size_t start = strspn(out, " \n");
     memmove(out, out + start, o - start + 1);
+    return dropped;
 }
 
 // lowercase ASCII only (accents stay as they are)
@@ -338,17 +356,19 @@ static void fmt_entry(const sched_t *s, char *out, size_t size)
         time_t tomorrow_t = now + 86400;
         struct tm tom;
         localtime_r(&tomorrow_t, &tom);
+        char hm[12];
+        clock_fmt(hm, sizeof(hm), t.tm_hour, t.tm_min);
         if (t.tm_yday == today.tm_yday && t.tm_year == today.tm_year) {
-            snprintf(when, sizeof(when), "%s %02d:%02d", T->today, t.tm_hour, t.tm_min);
+            snprintf(when, sizeof(when), "%s %s", T->today, hm);
         } else if (t.tm_yday == tom.tm_yday && t.tm_year == tom.tm_year) {
-            snprintf(when, sizeof(when), "%s %02d:%02d", T->tomorrow, t.tm_hour, t.tm_min);
+            snprintf(when, sizeof(when), "%s %s", T->tomorrow, hm);
         } else if (T->month_first) {
-            snprintf(when, sizeof(when), "%02d/%02d %02d:%02d", t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+            snprintf(when, sizeof(when), "%02d/%02d %s", t.tm_mon + 1, t.tm_mday, hm);
         } else {
-            snprintf(when, sizeof(when), "%02d/%02d %02d:%02d", t.tm_mday, t.tm_mon + 1, t.tm_hour, t.tm_min);
+            snprintf(when, sizeof(when), "%02d/%02d %s", t.tm_mday, t.tm_mon + 1, hm);
         }
     } else {
-        snprintf(when, sizeof(when), "%02d:%02d", s->hour, s->minute);
+        clock_fmt(when, sizeof(when), s->hour, s->minute);
     }
     fmt_duration(s->dur_min, dur, sizeof(dur));
     snprintf(out, size, "%s \xC2\xB7 %s \xC2\xB7 %s", when, dur, T->repeat[s->repeat]);
@@ -413,12 +433,14 @@ static void fmt_since(time_t t, char *out, size_t size)
     struct tm a, b;
     localtime_r(&t, &a);
     localtime_r(&now, &b);
+    char hm[12];
+    clock_fmt(hm, sizeof(hm), a.tm_hour, a.tm_min);
     if (a.tm_yday == b.tm_yday && a.tm_year == b.tm_year) {
-        snprintf(out, size, "%02d:%02d", a.tm_hour, a.tm_min);
-    } else if (T->month_first) {
-        snprintf(out, size, "%02d/%02d %02d:%02d", a.tm_mon + 1, a.tm_mday, a.tm_hour, a.tm_min);
+        snprintf(out, size, "%s", hm);
     } else {
-        snprintf(out, size, "%02d/%02d %02d:%02d", a.tm_mday, a.tm_mon + 1, a.tm_hour, a.tm_min);
+        snprintf(out, size, "%02d/%02d ", T->month_first ? a.tm_mon + 1 : a.tm_mday,
+                 T->month_first ? a.tm_mday : a.tm_mon + 1);
+        strlcat(out, hm, size);
     }
 }
 
@@ -521,12 +543,14 @@ static void send_status(int64_t chat_id)
         if (g->changed_at) {
             struct tm tm;
             localtime_r(&g->changed_at, &tm);
-            char when[8];
-            snprintf(when, sizeof(when), "%02d:%02d", tm.tm_hour % 24, tm.tm_min % 60);
+            char when[12];
+            clock_fmt(when, sizeof(when), tm.tm_hour, tm.tm_min);
             append(out, sizeof(out), &n, " \xC2\xB7 ");
             append(out, sizeof(out), &n, T->sens_updated_fmt, when);
         }
-        if (!g->shown) {
+        if (!g->changed_at) {
+            append(out, sizeof(out), &n, "\n    \xE2\x8F\xB3 %s", T->sens_wait);   // value of unknown age
+        } else if (!g->shown) {
             append(out, sizeof(out), &n, "\n    \xE2\x9A\xA0 %s", T->st_sens_gone);
         }
         append(out, sizeof(out), &n, "\n");
@@ -540,7 +564,7 @@ static void send_status(int64_t chat_id)
 static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t out_size)
 {
     static char clean[CLEAN_MAX];
-    sanitize(text, clean, sizeof(clean));
+    int dropped = sanitize(text, clean, sizeof(clean));
     if (!clean[0]) {
         reply(chat_id, T->tg_no_glyphs);
         return false;
@@ -565,6 +589,9 @@ static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t ou
         return false;
     }
     strlcpy(out, clean, out_size);
+    if (dropped) {
+        reply(chat_id, T->tg_some_dropped);
+    }
     return true;
 }
 
@@ -676,6 +703,58 @@ static void wizard_input(int64_t chat_id, const char *text)
 
 // ---------- commands ----------
 
+// /mensagens: what is on the panel right now and whether it was opened with the button
+static void send_messages(int64_t chat_id)
+{
+    static msg_item_t items[MSG_ITEMS_MAX];
+    static char out[1536];
+    int n_items = msg_active(items, MSG_ITEMS_MAX);
+    if (n_items == 0) {
+        reply(chat_id, T->msg_none);
+        return;
+    }
+    int n = 0;
+    append(out, sizeof(out), &n, "%s\n", T->tg_msgs_title);
+    time_t now = time(NULL);
+    struct tm today;
+    localtime_r(&now, &today);
+    for (int i = 0; i < n_items; i++) {
+        const msg_item_t *m = &items[i];
+        // first ~50 characters, cut on a UTF-8 boundary
+        char text[160];
+        int bytes = 0, chars = 0;
+        while (m->text[bytes] && bytes < (int)sizeof(text) - 4) {
+            if (((unsigned char)m->text[bytes] & 0xc0) != 0x80 && chars++ == 50) {
+                break;
+            }
+            bytes++;
+        }
+        snprintf(text, sizeof(text), "%.*s%s", bytes, m->text, m->text[bytes] ? "\xE2\x80\xA6" : "");
+        for (char *p = text; *p; p++) {
+            if (*p == '\n') {
+                *p = ' ';
+            }
+        }
+        char when[24] = "";
+        if (m->when > 0) {
+            struct tm t;
+            localtime_r(&m->when, &t);
+            char hm[12];
+            clock_fmt(hm, sizeof(hm), t.tm_hour, t.tm_min);
+            if (t.tm_yday == today.tm_yday && t.tm_year == today.tm_year) {
+                snprintf(when, sizeof(when), " \xC2\xB7 %s", hm);
+            } else {
+                snprintf(when, sizeof(when), " \xC2\xB7 %02d/%02d %s", t.tm_mday % 32, (t.tm_mon + 1) % 13, hm);
+            }
+        }
+        // 🔵 unread / ✅ read; ✉ direct / 🔔 scheduled
+        append(out, sizeof(out), &n, "\n%d. %s %s %s\n    %s%s\n", i + 1, m->unread ? "\xF0\x9F\x94\xB5" : "\xE2\x9C\x85",
+               m->scheduled ? "\xF0\x9F\x94\x94" : "\xE2\x9C\x89\xEF\xB8\x8F", m->unread ? T->tg_msg_unread : T->tg_msg_read,
+               text, when);
+    }
+    reply(chat_id, out);
+}
+
 static void handle_command(int64_t chat_id, const char *text)
 {
     static const char *const HELP[] = {"/ajuda", "/help", "/ayuda", "/start"};
@@ -684,6 +763,7 @@ static void handle_command(int64_t chat_id, const char *text)
     static const char *const LIST[] = {"/agenda", "/list", "/lista"};
     static const char *const CANCEL[] = {"/cancelar", "/cancel"};
     static const char *const STATUS[] = {"/status", "/estado", "/ping"};
+    static const char *const MESSAGES[] = {"/mensagens", "/messages", "/mensajes", "/msgs"};
 
     char cmd[32];
     strlcpy(cmd, text, sizeof(cmd));
@@ -699,6 +779,8 @@ static void handle_command(int64_t chat_id, const char *text)
         reply(chat_id, T->tg_help);
     } else if (is_cmd(cmd, STATUS, 3)) {
         send_status(chat_id);
+    } else if (is_cmd(cmd, MESSAGES, 4)) {
+        send_messages(chat_id);
     } else if (is_cmd(cmd, CLEAR, 3)) {
         msg_clear_all();
         reply(chat_id, T->tg_cleared);
@@ -787,8 +869,16 @@ static void handle_message(const cJSON *msg)
     }
 }
 
+static volatile tg_state_t s_state = TG_OFF;
+
+tg_state_t telegram_state(void)
+{
+    return s_state;
+}
+
 static void telegram_task(void *arg)
 {
+    s_state = TG_CONNECTING;
     set_commands();
 
     bool announced = false;
@@ -805,6 +895,7 @@ static void telegram_task(void *arg)
         cJSON *root = net_http_json(url, NULL, (wait_s + 10) * 1000);
         if (!cJSON_IsTrue(cJSON_GetObjectItem(root, "ok"))) {
             cJSON_Delete(root);
+            s_state = TG_FAILING;
             if (!fail_since) {
                 fail_since = uptime_s();
                 fail_wall = time(NULL);
@@ -814,6 +905,7 @@ static void telegram_task(void *arg)
             continue;
         }
 
+        s_state = TG_OK;
         // connection ok: report the boot once, and outages longer than 1 min
         if (g_cfg.tg_owner && !announced) {
             announce_boot();

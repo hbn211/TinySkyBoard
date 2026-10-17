@@ -85,3 +85,15 @@ void dimmer_set_sun(time_t sunrise, time_t sunset)
     s_sunset_s = sec_of_day(sunset);
     apply();
 }
+
+bool dimmer_is_day(void)
+{
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    if (s_sunrise_s < 0 || tm.tm_year < (2024 - 1900)) {
+        return true;
+    }
+    int t = sec_of_day(now);
+    return t >= s_sunrise_s && t < s_sunset_s;
+}

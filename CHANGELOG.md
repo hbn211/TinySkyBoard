@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.0 — 2026-10-17
+
+- **Other cities** (optional, up to 4, on the setup page): a page per city with its local time,
+  date, time difference and weather.
+- **12-hour clock** (AM/PM) option, used on the screen and in the bot's replies.
+- Wi-Fi signal as 1–4 bars instead of dBm, sweeping while connecting (no "Connecting…" text); lighter gray for secondary text.
+- Animated weather icon on the dashboard instead of the weather's name (sun with a glow, moon at
+  night, drifting clouds, falling rain and snow, fog, lightning), and weather icons in the forecast.
+  Larger text for the status bar, the city and humidity/wind.
+- Color emoji in messages (Twemoji, about 370 of the most used). Emoji the panel doesn't have are
+  left out and the bot says so.
+- `/messages` (`/mensagens`, `/mensajes`): which messages are on the screen and whether they were read.
+- `/clear` only deletes the sent messages; scheduled ones stay (delete them with `/cancel N`).
+- The **Set up over Wi-Fi** card also shows a status list: IP address, last weather update,
+  Telegram and Govee connection (invalid key, sensors on screen) and uptime.
+- A deleted occurrence of a repeating schedule stays deleted after a restart, and an unread one
+  stays unread.
+- A Govee sensor only shows once the panel has seen its reading change, so a value of unknown age
+  is never shown.
+- Forecast columns spaced evenly; other cities' low/high without decimals.
+- Typing several cities in the main city field ("Munich, Tokyo") keeps the first one and moves the
+  rest to **Other cities**.
+
+### Fixes
+
+- The setup page opened over the home network could stop halfway: it's now sent in 4 KB chunks,
+  and Wi-Fi power saving is off (the board runs on USB).
+- Heap corruption (crash loop) when a one-line text cut with "…" changed: LVGL 9.3's
+  `lv_label_set_text_fmt` doesn't undo the dots; formatted texts now go through `lv_label_set_text`.
+- Single-line texts (status bar, city, status list) wrapped onto a second line instead of ending
+  in "…".
+- The gear on the setup card could land on top of the status list after a message was shown.
+
 ## 1.1.0 — 2026-10-16
 
 - **Govee Wi-Fi thermometers** through the Govee OpenAPI: temperature, humidity, today's low and

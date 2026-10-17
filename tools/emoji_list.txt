@@ -1,0 +1,20 @@
+# Emoji drawn on the panel (Twemoji, CC BY 4.0). One per line or several per line; spaces ignored.
+# Regenerate main/emoji/emoji_data.c with: python3 tools/gen_emoji.py
+# faces
+😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔
+🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐
+😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀
+💩 🤡 👻 👽 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾 🙈 🙉 🙊
+# hearts and symbols
+💋 💌 💘 💝 💖 💗 💓 💞 💕 💟 💔 ❤ 🧡 💛 💚 💙 💜 🤎 🖤 🤍 💯 💢 💥 💫 💦 💨 💬 💭 💤
+✅ ❌ ❗ ❓ ⚠ ⭐ 🌟 ✨ ⚡ 🔥 🎉 🎊 🎁 🎂 🎈 🏆 🥇 🔔 📌 📍 🔒 🔑 💡 ⏰ ⌛ 📅 📞 📱 💻 📷 📺 🎵 🎶
+# hands and people
+👋 🤚 ✋ 🖖 👌 🤏 ✌ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 💪 👀 👶 👦 👧 🧑 👨 👩 🧓 👴 👵 🙋 🤷 🤦 🏃 🚶 💃 🕺
+# weather and nature
+☀ 🌤 ⛅ 🌥 ☁ 🌦 🌧 ⛈ 🌩 🌨 ❄ ☃ ⛄ 🌬 🌪 🌫 🌈 ☔ 💧 🌊 🌙 🌛 🌞 🌍 🌸 🌹 🌻 🌷 🌱 🌲 🌳 🍀 🍁 🍂
+🐶 🐱 🐭 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🐝 🦋 🐌 🐞 🐢 🐍 🐙 🐠 🐬 🐳 🦄
+# food and drink
+🍎 🍊 🍋 🍌 🍉 🍇 🍓 🍒 🍑 🍍 🥑 🍅 🥕 🌽 🥦 🍞 🧀 🥚 🍳 🥓 🍔 🍟 🍕 🌭 🌮 🍝 🍣 🍦 🍩 🍪 🍰 🍫 🍬 🍿
+☕ 🍵 🍺 🍻 🍷 🥂 🍸 🥤 🍼
+# places, travel, activities
+🏠 🏡 🏢 🏥 🏫 ⛪ 🚗 🚕 🚌 🚲 🛵 🚂 ✈ 🚀 ⛵ 🚦 ⛽ 🏖 ⛰ 🏕 ⚽ 🏀 🏈 ⚾ 🎾 🏐 🎮 🎲 🎯 🎸 🎬 🛒 💰 💸 💳 📦 ✏ 📝 📚 📖 🔧 🔨 🧹 🛏 🚿 🛁 🧺 💊 🩺

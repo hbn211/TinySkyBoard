@@ -43,7 +43,7 @@ void msg_init(void);
 int msg_add_direct(const char *text);    // returns how many direct messages are active
 int msg_active(msg_item_t *out, int max);   // newest first
 bool msg_delete(uint32_t key);           // repeating schedule: only hides the current occurrence
-void msg_clear_all(void);                // /clear: removes everything from the screen
+void msg_clear_all(void);                // /clear: removes the direct messages (schedules stay)
 bool msg_mark_read(uint32_t key);        // opened with the button; false if it was already read
 int msg_unread_count(void);
 uint32_t msg_take_events(void);          // MSG_EV_*, since the last call

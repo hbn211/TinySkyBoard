@@ -3,14 +3,19 @@
 #include "config.h"
 #include "i18n.h"
 #include "schedule.h"
+#include "emoji/emoji.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdlib.h>
 #include "esp_wifi.h"
+#include "esp_netif.h"
+#include "esp_timer.h"
 
 #define COLOR_BG       lv_color_hex(0x0b0f1a)
 #define COLOR_CARD     lv_color_hex(0x161d2e)
-#define COLOR_MUTED    lv_color_hex(0x8a94a8)
+#define COLOR_MUTED    lv_color_hex(0xbac4d6)   // secondary text: light enough to read at low backlight
 #define COLOR_ACCENT   lv_color_hex(0x4fc3f7)
 #define COLOR_UNREAD   lv_color_hex(0xffb74d)
 
@@ -35,13 +40,15 @@ static int s_msg_s = CYCLE_DEFAULT_S;
 #define MSG_BOTTOM     22
 
 static lv_obj_t *s_status;
+static lv_obj_t *s_sig;           // Wi-Fi signal bars next to the network name
+static lv_obj_t *s_sig_bar[4];
+static int s_sig_sweep = -1;      // not connected: bars light up one by one; -1 = connected
 static lv_obj_t *s_time;
 static lv_obj_t *s_sec;
 static lv_obj_t *s_date;
 static lv_obj_t *s_temp;
-static lv_obj_t *s_desc;
 static lv_obj_t *s_extra;
-static lv_obj_t *s_dot;
+static lv_obj_t *s_wicon;     // animated weather icon
 static lv_obj_t *s_forecast;
 static lv_obj_t *s_cfg_msg;
 static lv_obj_t *s_msg_panel;
@@ -76,6 +83,19 @@ static bool s_lan;          // setup page open on the home network
 static char s_lan_url[48];
 static lv_obj_t *s_lan_panel;
 static lv_obj_t *s_lan_msg;
+#define INFO_ROWS      5
+#define CARD_GEAR      96   // gear side of the setup card (the USB/button side)
+static lv_obj_t *s_card_info;    // status list on the setup card
+static lv_obj_t *s_info_dot[INFO_ROWS];
+static lv_obj_t *s_info_txt[INFO_ROWS];
+static lv_obj_t *s_city_panel;   // other cities, after the dashboard
+static lv_obj_t *s_city_time;
+static lv_obj_t *s_city_ampm;
+static lv_obj_t *s_ampm;          // AM/PM next to the main clock (12-hour setting)
+static int s_city = -1;          // city page on screen; -1 = none
+static city_wx_t s_cities[CITIES_MAX];
+static int s_ncities;            // cities with data
+static int s_city_s = CYCLE_DEFAULT_S;
 static lv_obj_t *s_sens_panel;   // Govee sensors, between the dashboard and the messages
 static int s_sens = -1;          // sensor page on screen; -1 = none
 static govee_sensor_t s_govee[GOVEE_MAX];
@@ -87,14 +107,27 @@ typedef struct {
     uint32_t color;
 } wmo_info_t;
 
+int weather_kind(int code)
+{
+    return code == 0 ? WX_CLEAR : code <= 2 ? WX_PARTLY : code == 3 ? WX_CLOUDY : code <= 48 ? WX_FOG :
+           code <= 57 ? WX_DRIZZLE : code <= 67 ? WX_RAIN : code <= 77 ? WX_SNOW : code <= 82 ? WX_SHOWERS :
+           WX_THUNDER;
+}
+
 static wmo_info_t wmo_lookup(int code)
 {
     // T->weather indexes: clear, partly cloudy, cloudy, fog, drizzle, rain, snow, showers, thunderstorm
     static const uint32_t COLORS[] = {0xffd54f, 0xffe082, 0x90a4ae, 0xb0bec5, 0x81d4fa,
                                       0x42a5f5, 0xffffff, 0x1e88e5, 0xab47bc};
-    int i = code == 0 ? 0 : code <= 2 ? 1 : code == 3 ? 2 : code <= 48 ? 3 : code <= 57 ? 4 :
-            code <= 67 ? 5 : code <= 77 ? 6 : code <= 82 ? 7 : 8;
+    int i = weather_kind(code);
     return (wmo_info_t){T->weather[i], COLORS[i]};
+}
+
+// small static icon for the forecast rows (emoji size index: 0 = 16 px, 1 = 22 px)
+static const lv_image_dsc_t *forecast_icon(int code, int size)
+{
+    static const uint32_t CP[] = {0x2600, 0x26C5, 0x2601, 0x1F32B, 0x1F326, 0x1F327, 0x1F328, 0x1F327, 0x26C8};
+    return emoji_image(CP[weather_kind(code)], size);
 }
 
 static float temp_unit(float c)
@@ -119,6 +152,26 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color
     lv_obj_set_style_text_color(l, color, 0);
     lv_label_set_text(l, "");
     return l;
+}
+
+// lv_label_set_text_fmt in LVGL 9.3 doesn't undo the "..." of a LONG_DOT label before replacing the
+// text, and then writes the saved letters into the new (maybe shorter) text: heap corruption.
+// lv_label_set_text does it right, so every formatted text goes through here.
+static void label_fmt(lv_obj_t *l, const char *fmt, ...)
+{
+    char text[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(text, sizeof(text), fmt, ap);
+    va_end(ap);
+    lv_label_set_text(l, text);
+}
+
+// Single line cut with "..." (LONG_DOT only cuts with a fixed height; otherwise the text wraps)
+static void one_line(lv_obj_t *l, int width)
+{
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(l, width, lv_font_get_line_height(lv_obj_get_style_text_font(l, 0)));
 }
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
@@ -156,27 +209,48 @@ static void render_forecast(void)
 
     int inner_h = lv_obj_get_content_height(s_forecast);
     int row_h = inner_h / s_weather.n_days;
+
+    // columns sized by the widest day name and temperature, with equal gaps between them
+    char day_txt[FORECAST_DAYS][16], max_txt[FORECAST_DAYS][12], min_txt[FORECAST_DAYS][12];
+    int day_w = 0, temp_w = 0;
+    for (int i = 0; i < s_weather.n_days; i++) {
+        const forecast_day_t *d = &s_weather.days[i];
+        strlcpy(day_txt[i], i == 0 ? T->today : T->days[d->wday], sizeof(day_txt[i]));
+        snprintf(max_txt[i], sizeof(max_txt[i]), "%.0f" DEG, temp_unit(d->temp_max));
+        snprintf(min_txt[i], sizeof(min_txt[i]), "%.0f" DEG, temp_unit(d->temp_min));
+        lv_point_t sz;
+        lv_text_get_size(&sz, day_txt[i], &font_pt_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        day_w = LV_MAX(day_w, sz.x);
+        lv_text_get_size(&sz, max_txt[i], &font_pt_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        temp_w = LV_MAX(temp_w, sz.x);
+        lv_text_get_size(&sz, min_txt[i], &font_pt_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        temp_w = LV_MAX(temp_w, sz.x);
+    }
     for (int i = 0; i < s_weather.n_days; i++) {
         const forecast_day_t *d = &s_weather.days[i];
         lv_obj_t *row = lv_obj_create(s_forecast);
         lv_obj_remove_style_all(row);
         lv_obj_set_size(row, lv_pct(100), row_h);
         lv_obj_set_pos(row, 0, i * row_h);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t *day = label(row, &font_pt_14, i == 0 ? COLOR_ACCENT : lv_color_white());
-        lv_label_set_text(day, i == 0 ? T->today : T->days[d->wday]);
-        lv_obj_align(day, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_label_set_text(day, day_txt[i]);
+        lv_obj_set_width(day, day_w);
 
-        lv_obj_t *icon = dot(row, 10, lv_color_hex(wmo_lookup(d->code).color));
-        lv_obj_align(icon, LV_ALIGN_LEFT_MID, 46, 0);
-
-        lv_obj_t *tmin = label(row, &font_pt_14, COLOR_MUTED);
-        lv_label_set_text_fmt(tmin, "%.0f" DEG, temp_unit(d->temp_min));
-        lv_obj_align(tmin, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_t *icon = lv_image_create(row);
+        lv_image_set_src(icon, forecast_icon(d->code, row_h >= 26 ? 1 : 0));
 
         lv_obj_t *tmax = label(row, &font_pt_14, lv_color_white());
-        lv_label_set_text_fmt(tmax, "%.0f" DEG, temp_unit(d->temp_max));
-        lv_obj_align(tmax, LV_ALIGN_RIGHT_MID, -38, 0);
+        lv_label_set_text(tmax, max_txt[i]);
+        lv_obj_set_width(tmax, temp_w);
+        lv_obj_set_style_text_align(tmax, LV_TEXT_ALIGN_RIGHT, 0);
+
+        lv_obj_t *tmin = label(row, &font_pt_14, COLOR_MUTED);
+        lv_label_set_text(tmin, min_txt[i]);
+        lv_obj_set_width(tmin, temp_w);
+        lv_obj_set_style_text_align(tmin, LV_TEXT_ALIGN_RIGHT, 0);
     }
 }
 
@@ -185,19 +259,18 @@ static void render_current(void)
     if (!s_has_weather) {
         return;
     }
-    wmo_info_t info = wmo_lookup(s_weather.code);
-    lv_label_set_text_fmt(s_temp, "%.1f" DEG "%c", temp_unit(s_weather.temp), s_fahrenheit ? 'F' : 'C');
-    lv_label_set_text(s_desc, info.text);
-    lv_obj_set_style_bg_color(s_dot, lv_color_hex(info.color), 0);
+    label_fmt(s_temp, "%.1f" DEG "%c", temp_unit(s_weather.temp), s_fahrenheit ? 'F' : 'C');
+    weather_icon_set(s_wicon, weather_kind(s_weather.code), dimmer_is_day());
     if (s_extra) {
-        lv_label_set_text_fmt(s_extra, T->humidity_wind_fmt, s_weather.humidity, s_weather.wind_kmh);
+        label_fmt(s_extra, T->humidity_wind_fmt, s_weather.humidity, s_weather.wind_kmh);
     }
 }
 
 // Largest font in which the whole text fits an aw x ah area; NULL if not even the smallest fits
 static const lv_font_t *fit_font(const char *text, int aw, int ah)
 {
-    static const lv_font_t *fonts[] = {&font_pt_28, &font_pt_20, &font_pt_14};
+    // message fonts with the color emoji as fallback
+    const lv_font_t *fonts[] = {emoji_font(&font_pt_28), emoji_font(&font_pt_20), emoji_font(&font_pt_14)};
     for (size_t i = 0; i < sizeof(fonts) / sizeof(fonts[0]); i++) {
         lv_point_t sz;
         lv_text_get_size(&sz, text, fonts[i], 0, 0, aw, LV_TEXT_FLAG_NONE);
@@ -253,6 +326,88 @@ bool ui_text_fits(const char *text, int *max_chars)
     return false;
 }
 
+// "09:15" today, "15/10 09:15" on another day
+static void fmt_time(char *out, size_t size, time_t t)
+{
+    struct tm tm, today;
+    time_t now = time(NULL);
+    localtime_r(&t, &tm);
+    localtime_r(&now, &today);
+    char hm[12];
+    clock_fmt(hm, sizeof(hm), tm.tm_hour, tm.tm_min);
+    if (tm.tm_yday == today.tm_yday && tm.tm_year == today.tm_year) {
+        snprintf(out, size, "%s", hm);
+    } else {
+        snprintf(out, size, "%02d/%02d %s", tm.tm_mday, tm.tm_mon + 1, hm);
+    }
+}
+
+static void info_row(int i, uint32_t color, const char *fmt, ...)
+{
+    char text[64];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(text, sizeof(text), fmt, ap);
+    va_end(ap);
+    lv_obj_set_style_bg_color(s_info_dot[i], lv_color_hex(color), 0);
+    lv_label_set_text(s_info_txt[i], text);
+}
+
+// Status list on the setup card: is everything connected?
+static void update_card_info(void)
+{
+    if (!s_card_info || lv_obj_has_flag(s_card_info, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
+    const uint32_t OK = 0x22c55e, WAIT = 0xffb74d, BAD = 0xff4d4f, OFF = 0x8a94a8;
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        esp_netif_ip_info_t ip = {0};
+        esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip);
+        info_row(0, OK, "IP " IPSTR, IP2STR(&ip.ip));   // signal strength is already on the dashboard
+    } else {
+        info_row(0, BAD, "%s", T->info_wifi_off);
+    }
+
+    if (s_has_weather) {
+        char when[40];
+        fmt_time(when, sizeof(when), s_weather.updated_at);
+        info_row(1, time(NULL) - s_weather.updated_at < 40 * 60 ? OK : WAIT, T->info_weather_fmt, when);
+    } else {
+        info_row(1, WAIT, "%s", T->info_weather_wait);
+    }
+
+    switch (telegram_state()) {
+    case TG_OK: info_row(2, OK, "%s", T->info_tg_ok); break;
+    case TG_FAILING: info_row(2, BAD, "%s", T->info_tg_fail); break;
+    case TG_CONNECTING: info_row(2, WAIT, "%s", T->info_tg_wait); break;
+    default: info_row(2, OFF, "%s", T->info_tg_off); break;
+    }
+
+    govee_status_t gv = govee_status();
+    if (!gv.on) {
+        info_row(3, OFF, "%s", T->info_gv_off);
+    } else if (gv.http == 401 || gv.http == 403) {
+        info_row(3, BAD, "%s", T->info_gv_key);
+    } else if (gv.http == 0) {
+        info_row(3, WAIT, "%s", T->info_gv_wait);
+    } else if (gv.http != 200) {
+        info_row(3, BAD, T->info_gv_err_fmt, gv.http);
+    } else {
+        // connected; orange while some sensor is off the screen (waiting for its first change, or gone quiet)
+        info_row(3, gv.shown == gv.sensors ? OK : WAIT, T->info_gv_ok_fmt, gv.shown, gv.sensors);
+    }
+
+    int64_t up = esp_timer_get_time() / 1000000;
+    char span[24];
+    if (up >= 86400) {
+        snprintf(span, sizeof(span), "%dd %dh", (int)(up / 86400), (int)(up % 86400 / 3600));
+    } else {
+        snprintf(span, sizeof(span), "%dh%02dm", (int)(up / 3600), (int)(up % 3600 / 60));
+    }
+    info_row(4, OFF, T->info_up_fmt, span);
+}
+
 static void render_message(void)
 {
     if (!s_msg_panel) {
@@ -263,23 +418,52 @@ static void render_message(void)
     int aw = w - 24, ah = h - MSG_TOP - MSG_BOTTOM;
     if (s_card) {
         // last stop of the browse sequence: open the setup page on the home network
-        lv_label_set_text_fmt(s_msg_title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
+        label_fmt(s_msg_title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
         lv_obj_set_style_text_color(s_msg_title, COLOR_ACCENT, 0);
         lv_label_set_text(s_msg_when, "");
-        // just a big gear: the title and the footer already say what it does
+
+        // split: a big gear on the side of the USB edge (where the button is), status on the other
+        int ch = h - MSG_TOP - MSG_BOTTOM;
+        int usb = 0;   // 0 bottom, 1 left, 2 top, 3 right
+        for (int i = 0; i < 4; i++) {
+            if (BOARD_USB_TO_ROT[i] == lv_display_get_rotation(NULL)) {
+                usb = i;
+            }
+        }
+        bool landscape = w > h;
+        bool gear_first = landscape ? usb != 3 : usb == 2;   // left/top part
+        int gx, gy, gw, gh, ix, iy, iw, ih;
+        if (landscape) {
+            gw = CARD_GEAR, gh = ch, iw = w - CARD_GEAR - 16, ih = ch;
+            gx = gear_first ? 0 : w - CARD_GEAR, ix = gear_first ? CARD_GEAR : 8;
+            gy = iy = MSG_TOP;
+        } else {
+            gw = w, gh = CARD_GEAR, iw = w - 20, ih = ch - CARD_GEAR;
+            gy = gear_first ? MSG_TOP : h - MSG_BOTTOM - CARD_GEAR, iy = gear_first ? MSG_TOP + CARD_GEAR : MSG_TOP + 4;
+            gx = 0, ix = 10;
+        }
         lv_obj_set_style_text_font(s_msg_label, &font_pt_28, 0);
         lv_obj_set_style_transform_scale(s_msg_label, 512, 0);   // 2x
         lv_obj_set_style_transform_pivot_x(s_msg_label, lv_pct(50), 0);
         lv_obj_set_style_transform_pivot_y(s_msg_label, lv_pct(50), 0);
         lv_label_set_long_mode(s_msg_label, LV_LABEL_LONG_WRAP);
-        lv_obj_set_size(s_msg_label, aw, LV_SIZE_CONTENT);
+        lv_obj_set_size(s_msg_label, gw, LV_SIZE_CONTENT);
         lv_label_set_text(s_msg_label, LV_SYMBOL_SETTINGS);
         lv_obj_set_style_text_color(s_msg_label, COLOR_ACCENT, 0);
-        lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (MSG_TOP - MSG_BOTTOM) / 2);
+        lv_obj_update_layout(s_msg_label);
+        // align, not set_pos: a message before left the label centered, and set_pos would be relative to that
+        lv_obj_align(s_msg_label, LV_ALIGN_TOP_LEFT, gx, gy + (gh - lv_obj_get_height(s_msg_label)) / 2);
+
+        lv_obj_set_pos(s_card_info, ix, iy);
+        lv_obj_set_size(s_card_info, iw, ih);
+        lv_obj_remove_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
+        update_card_info();
+
         lv_label_set_text(s_msg_hint, T->card_hint);
         lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
     if (s_idx < 0 || s_idx >= s_n) {
         lv_obj_add_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -292,14 +476,14 @@ static void render_message(void)
         snprintf(count, sizeof(count), "  %d/%d", s_idx + 1, s_n);
     }
     // unread (not opened with the button yet): orange header with a "new" tag
-    lv_label_set_text_fmt(s_msg_title, "%s  %s%s%s%s", m->scheduled ? LV_SYMBOL_BELL : LV_SYMBOL_ENVELOPE,
+    label_fmt(s_msg_title, "%s  %s%s%s%s", m->scheduled ? LV_SYMBOL_BELL : LV_SYMBOL_ENVELOPE,
                           T->msg_title, count, m->unread ? "  \xC2\xB7  " : "", m->unread ? T->msg_unread_tag : "");
     lv_obj_set_style_text_color(s_msg_title, m->unread ? COLOR_UNREAD : COLOR_ACCENT, 0);
 
     const lv_font_t *font = fit_font(m->text, aw, ah);
     lv_obj_set_style_transform_scale(s_msg_label, 256, 0);
     lv_obj_set_style_text_color(s_msg_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(s_msg_label, font ? font : &font_pt_14, 0);
+    lv_obj_set_style_text_font(s_msg_label, font ? font : emoji_font(&font_pt_14), 0);
     lv_label_set_long_mode(s_msg_label, font ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
     lv_obj_set_size(s_msg_label, aw, font ? LV_SIZE_CONTENT : ah);
     lv_label_set_text(s_msg_label, m->text);
@@ -310,10 +494,12 @@ static void render_message(void)
         time_t now = time(NULL);
         localtime_r(&m->when, &t);
         localtime_r(&now, &today);
+        char hm[12];
+        clock_fmt(hm, sizeof(hm), t.tm_hour, t.tm_min);
         if (t.tm_yday == today.tm_yday && t.tm_year == today.tm_year) {
-            lv_label_set_text_fmt(s_msg_when, T->msg_today_fmt, t.tm_hour, t.tm_min);
+            label_fmt(s_msg_when, T->msg_today_fmt, hm);
         } else {
-            lv_label_set_text_fmt(s_msg_when, "%02d/%02d %02d:%02d", t.tm_mday, t.tm_mon + 1, t.tm_hour, t.tm_min);
+            label_fmt(s_msg_when, "%02d/%02d %s", t.tm_mday, t.tm_mon + 1, hm);
         }
     } else {
         lv_label_set_text(s_msg_when, "");
@@ -326,38 +512,59 @@ static void render_message(void)
     }
 }
 
-// Switches what's on screen: dashboard (idx -1) or message idx, with a fade
-static void show(int idx)
+// Pages over the dashboard (top layer): messages/setup card, sensor pages, other cities
+enum { OV_NONE, OV_MSG, OV_SENS, OV_CITY };
+
+static int overlay_now(void)
 {
-    if (!s_msg_panel) {
-        s_idx = idx;
+    return s_idx >= 0 || s_card ? OV_MSG : s_sens >= 0 ? OV_SENS : s_city >= 0 ? OV_CITY : OV_NONE;
+}
+
+static lv_obj_t *overlay_obj(int ov)
+{
+    return ov == OV_MSG ? s_msg_panel : ov == OV_SENS ? s_sens_panel : ov == OV_CITY ? s_city_panel : NULL;
+}
+
+// Shows overlay "next" (already rendered) after "prev": fades over the dashboard, cuts between pages
+static void present(int prev, int next)
+{
+    lv_obj_t *po = overlay_obj(prev), *no = overlay_obj(next);
+    if (!no) {
+        if (po) {
+            lv_obj_fade_out(po, 300, 0);
+        }
         return;
     }
-    bool was_visible = !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
-    bool sens_visible = s_sens >= 0;
+    for (int ov = OV_MSG; ov <= OV_CITY; ov++) {
+        if (ov != next && overlay_obj(ov)) {
+            lv_obj_add_flag(overlay_obj(ov), LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_obj_remove_flag(no, LV_OBJ_FLAG_HIDDEN);
+    if (prev != OV_NONE) {
+        lv_obj_set_style_opa(no, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_fade_in(no, 300, 0);
+    }
+}
+
+// Switches what's on screen: dashboard (idx -1) or message idx
+static void show(int idx)
+{
+    int prev = overlay_now();
     s_card = false;
     s_idx = idx;
     s_sens = -1;
-    if (idx < 0) {
-        if (was_visible) {
-            lv_obj_fade_out(s_msg_panel, 300, 0);
-        }
-        if (sens_visible) {
-            lv_obj_fade_out(s_sens_panel, 300, 0);
-        }
-        lv_obj_add_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+    s_city = -1;
+    if (!s_msg_panel) {
         return;
     }
-    if (sens_visible) {
-        lv_obj_add_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    render_message();
-    lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
-    if (was_visible || sens_visible) {
-        lv_obj_set_style_opa(s_msg_panel, LV_OPA_COVER, 0);
+    if (idx < 0) {
+        lv_obj_add_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_fade_in(s_msg_panel, 300, 0);
+        render_message();
     }
+    present(prev, idx < 0 ? OV_NONE : OV_MSG);
 }
 
 static void refresh_items(void)
@@ -377,43 +584,21 @@ static void browse_show(int idx)
 
 static void show_card(void)
 {
-    bool was_visible = s_msg_panel && !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card);
-    if (s_sens >= 0) {
-        lv_obj_add_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
-        was_visible = true;   // no fade: something already covers the dashboard
-    }
+    int prev = overlay_now();
     s_idx = -1;
     s_card = true;
     s_sens = -1;
+    s_city = -1;
     if (!s_msg_panel) {
         return;
     }
     render_message();
-    lv_obj_remove_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
-    if (was_visible) {
-        lv_obj_set_style_opa(s_msg_panel, LV_OPA_COVER, 0);
-    } else {
-        lv_obj_fade_in(s_msg_panel, 300, 0);
-    }
+    present(prev, OV_MSG);
 }
 
 static int sens_pages(void)
 {
     return (s_ng + SENS_PER_PAGE - 1) / SENS_PER_PAGE;
-}
-
-// "09:15" today, "15/10 09:15" on another day
-static void fmt_time(char *out, size_t size, time_t t)
-{
-    struct tm tm, today;
-    time_t now = time(NULL);
-    localtime_r(&t, &tm);
-    localtime_r(&now, &today);
-    if (tm.tm_yday == today.tm_yday && tm.tm_year == today.tm_year) {
-        snprintf(out, size, "%02d:%02d", tm.tm_hour, tm.tm_min);
-    } else {
-        snprintf(out, size, "%02d/%02d %02d:%02d", tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
-    }
 }
 
 /*
@@ -438,9 +623,9 @@ static void render_sensors(void)
 
     lv_obj_t *title = label(s_sens_panel, &font_pt_14, COLOR_ACCENT);
     if (sens_pages() > 1) {
-        lv_label_set_text_fmt(title, LV_SYMBOL_HOME "  %s  %d/%d", T->sens_title, s_sens + 1, sens_pages());
+        label_fmt(title, LV_SYMBOL_HOME "  %s  %d/%d", T->sens_title, s_sens + 1, sens_pages());
     } else {
-        lv_label_set_text_fmt(title, LV_SYMBOL_HOME "  %s", T->sens_title);
+        label_fmt(title, LV_SYMBOL_HOME "  %s", T->sens_title);
     }
     lv_obj_set_pos(title, 10, 8);
     lv_obj_t *bar = lv_obj_create(s_sens_panel);
@@ -472,7 +657,7 @@ static void render_sensors(void)
         if (g->changed_at) {
             char when[40];
             fmt_time(when, sizeof(when), g->changed_at);
-            lv_label_set_text_fmt(foot, T->sens_updated_fmt, when);
+            label_fmt(foot, T->sens_updated_fmt, when);
         } else {
             lv_label_set_text(foot, T->sens_wait);   // a reading, but no upload seen yet
         }
@@ -481,7 +666,7 @@ static void render_sensors(void)
         int y_temp = single ? (landscape ? 20 : 44) : 18;
         int y_range = single ? (landscape ? 76 : 108) : 52;
         lv_obj_t *temp = label(c, single ? &lv_font_montserrat_48 : &font_pt_28, lv_color_white());
-        lv_label_set_text_fmt(temp, "%.1f" DEG "%c", temp_unit(g->temp_c), unit);
+        label_fmt(temp, "%.1f" DEG "%c", temp_unit(g->temp_c), unit);
         lv_obj_set_pos(temp, 0, y_temp);
         if (g->has_trend) {
             lv_obj_t *arrow = label(c, single ? &font_pt_28 : &font_pt_20, g->trend > 0 ? lv_color_hex(0xff8a65) :
@@ -492,12 +677,12 @@ static void render_sensors(void)
         }
 
         lv_obj_t *range = label(c, single ? &font_pt_14 : &font_pt_12, COLOR_MUTED);
-        lv_label_set_text_fmt(range, T->sens_minmax_fmt, temp_unit(g->day_min), temp_unit(g->day_max));
+        label_fmt(range, T->sens_minmax_fmt, temp_unit(g->day_min), temp_unit(g->day_max));
         lv_obj_set_pos(range, 0, y_range);
 
         if (g->humidity >= 0) {
             lv_obj_t *hum = label(c, single ? &font_pt_20 : &font_pt_14, lv_color_white());
-            lv_label_set_text_fmt(hum, T->sens_hum_fmt, g->humidity);
+            label_fmt(hum, T->sens_hum_fmt, g->humidity);
             if (single && landscape) {
                 lv_obj_align(hum, LV_ALIGN_TOP_RIGHT, 0, 34);
             } else {
@@ -509,24 +694,16 @@ static void render_sensors(void)
 
 static void show_sensors(int page)
 {
-    bool covered = (s_msg_panel && !lv_obj_has_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN) && (s_idx >= 0 || s_card)) ||
-                   s_sens >= 0;
+    int prev = overlay_now();
     s_idx = -1;
     s_card = false;
     s_sens = page;
+    s_city = -1;
     if (!s_sens_panel) {
         return;
     }
-    if (s_msg_panel) {
-        lv_obj_add_flag(s_msg_panel, LV_OBJ_FLAG_HIDDEN);
-    }
     render_sensors();
-    lv_obj_remove_flag(s_sens_panel, LV_OBJ_FLAG_HIDDEN);
-    if (covered) {
-        lv_obj_set_style_opa(s_sens_panel, LV_OPA_COVER, 0);
-    } else {
-        lv_obj_fade_in(s_sens_panel, 300, 0);
-    }
+    present(prev, OV_SENS);
 }
 
 static void build_sensor_panel(int w, int h)
@@ -580,6 +757,26 @@ static void build_message_panel(int w, int h)
     s_msg_label = label(s_msg_panel, &font_pt_20, lv_color_white());
     lv_obj_set_style_text_align(s_msg_label, LV_TEXT_ALIGN_CENTER, 0);
 
+    // status list of the setup card (placed by render_message)
+    s_card_info = lv_obj_create(s_msg_panel);
+    lv_obj_remove_style_all(s_card_info);
+    lv_obj_remove_flag(s_card_info, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(s_card_info, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_card_info, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(s_card_info, 2, 0);
+    for (int i = 0; i < INFO_ROWS; i++) {
+        lv_obj_t *row = lv_obj_create(s_card_info);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_size(row, lv_pct(100), 20);
+        s_info_dot[i] = dot(row, 9, COLOR_MUTED);
+        lv_obj_align(s_info_dot[i], LV_ALIGN_LEFT_MID, 0, 0);
+        s_info_txt[i] = label(row, &font_pt_14, lv_color_white());
+        lv_label_set_long_mode(s_info_txt[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_size(s_info_txt[i], lv_pct(92), lv_font_get_line_height(&font_pt_14));
+        lv_obj_align(s_info_txt[i], LV_ALIGN_LEFT_MID, 14, 0);
+    }
+    lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
+
     s_msg_hint = label(s_msg_panel, &font_pt_12, COLOR_MUTED);
     lv_label_set_text(s_msg_hint, T->msg_browse_hint);
     lv_obj_align(s_msg_hint, LV_ALIGN_BOTTOM_MID, 0, -4);
@@ -618,7 +815,196 @@ static void build_message_panel(int w, int h)
     }
 }
 
-// Normal cycle: dashboard, sensor pages, then each active message
+// ---------- other cities ----------
+
+// Big clock: "14:05", or "2:05" with "PM" in a small label next to it (12-hour setting)
+static void big_clock(lv_obj_t *time_label, lv_obj_t *ampm, int hour, int min)
+{
+    if (g_cfg.h12) {
+        label_fmt(time_label, "%d:%02d", hour % 12 ? hour % 12 : 12, min);
+        lv_label_set_text(ampm, hour < 12 ? "AM" : "PM");
+        lv_obj_update_layout(time_label);
+        lv_obj_align_to(ampm, time_label, LV_ALIGN_OUT_RIGHT_TOP, 4, 8);
+    } else {
+        label_fmt(time_label, "%02d:%02d", hour, min);
+        lv_label_set_text(ampm, "");
+    }
+}
+
+static void city_time_text(void)
+{
+    if (!s_city_time || s_city < 0 || s_city >= s_ncities) {
+        return;
+    }
+    time_t t = time(NULL) + s_cities[s_city].utc_offset;
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    big_clock(s_city_time, s_city_ampm, tm.tm_hour, tm.tm_min);
+}
+
+/*
+ * Portrait: name, big time, date + difference, weather card below.
+ * Landscape: time and date on the left, weather card on the right.
+ */
+static void render_city(void)
+{
+    if (!s_city_panel || s_city < 0 || s_city >= s_ncities) {
+        return;
+    }
+    lv_obj_clean(s_city_panel);
+    const city_wx_t *c = &s_cities[s_city];
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    bool landscape = w > h;
+
+    lv_obj_t *title = label(s_city_panel, &font_pt_14, COLOR_ACCENT);
+    one_line(title, w - 20);
+    label_fmt(title, LV_SYMBOL_GPS "  %s", c->name);
+    lv_obj_set_pos(title, 10, 8);
+    lv_obj_t *bar = lv_obj_create(s_city_panel);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, w - 20, 2);
+    lv_obj_set_pos(bar, 10, 30);
+    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
+
+    s_city_time = label(s_city_panel, &lv_font_montserrat_48, lv_color_white());
+    s_city_ampm = label(s_city_panel, &font_pt_20, COLOR_ACCENT);
+
+    // date there + difference to here ("+4h", "-5h30", "same time")
+    time_t t = time(NULL) + c->utc_offset;
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    char date[48], diff[24];
+    if (T->month_first) {
+        snprintf(date, sizeof(date), "%s, %s %d", T->days[tm.tm_wday], T->months[tm.tm_mon], tm.tm_mday);
+    } else {
+        snprintf(date, sizeof(date), "%s, %d %s", T->days[tm.tm_wday], tm.tm_mday, T->months[tm.tm_mon]);
+    }
+    int d = (c->utc_offset - s_weather.utc_offset) / 60;
+    if (!s_has_weather || d == 0) {
+        strlcpy(diff, s_has_weather ? T->city_same_time : "", sizeof(diff));
+    } else if (d % 60) {
+        snprintf(diff, sizeof(diff), "%c%dh%02d", d > 0 ? '+' : '-', abs(d) / 60, abs(d) % 60);
+    } else {
+        snprintf(diff, sizeof(diff), "%c%dh", d > 0 ? '+' : '-', abs(d) / 60);
+    }
+    lv_obj_t *dl = label(s_city_panel, &font_pt_14, COLOR_MUTED);
+    label_fmt(dl, "%s  \xC2\xB7  %s", date, diff);
+
+    int cx, cy, cw, ch;
+    city_time_text();   // sets the text, so the position below uses the real width
+    lv_obj_update_layout(s_city_time);
+    if (landscape) {
+        lv_obj_set_pos(s_city_time, 12, 46);
+        lv_obj_set_pos(dl, 14, 104);
+        cx = 176, cy = 40, cw = w - 182, ch = h - 46;
+    } else {
+        lv_obj_align(s_city_time, LV_ALIGN_TOP_MID, 0, 50);
+        lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, 110);
+        if (g_cfg.h12) {
+            lv_obj_set_x(s_city_time, lv_obj_get_x(s_city_time) - 14);   // room for AM/PM on the right
+        }
+        cx = 6, cy = 146, cw = w - 12, ch = h - 152;
+    }
+    lv_obj_t *card_obj = card(s_city_panel, cx, cy, cw, ch);
+    lv_obj_t *icon = weather_icon_create(card_obj);
+    weather_icon_set(icon, weather_kind(c->code), c->is_day);
+    lv_obj_t *temp = label(card_obj, &font_pt_28, lv_color_white());
+    label_fmt(temp, "%.0f" DEG "%c", temp_unit(c->temp), s_fahrenheit ? 'F' : 'C');
+    lv_obj_t *range = label(card_obj, &font_pt_14, COLOR_MUTED);
+    label_fmt(range, T->city_minmax_fmt, temp_unit(c->tmin), temp_unit(c->tmax));   // no decimals: narrow card
+    lv_obj_t *desc = label(card_obj, &font_pt_14, lv_color_white());
+    one_line(desc, cw - 16);
+    lv_label_set_text(desc, wmo_lookup(c->code).text);
+    if (landscape) {
+        lv_obj_set_pos(icon, 0, 0);
+        lv_obj_set_pos(temp, 52, 6);
+        lv_obj_set_pos(range, 0, 52);
+        lv_obj_set_pos(desc, 0, 74);
+    } else {
+        lv_obj_set_pos(icon, 0, 4);
+        lv_obj_set_pos(temp, 56, 8);
+        lv_obj_set_pos(desc, 0, 56);
+        lv_obj_set_pos(range, 0, 80);
+    }
+}
+
+static void show_city(int i)
+{
+    int prev = overlay_now();
+    s_idx = -1;
+    s_card = false;
+    s_sens = -1;
+    s_city = i;
+    if (!s_city_panel) {
+        return;
+    }
+    render_city();
+    present(prev, OV_CITY);
+}
+
+static void build_city_panel(int w, int h)
+{
+    s_city_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_city_panel);
+    lv_obj_set_size(s_city_panel, w, h);
+    lv_obj_set_style_bg_color(s_city_panel, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_city_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_city_panel, LV_OBJ_FLAG_SCROLLABLE);
+    s_city_time = NULL;
+    s_city_ampm = NULL;
+    if (s_city >= s_ncities) {
+        s_city = -1;
+    }
+    if (s_city >= 0) {
+        render_city();
+    } else {
+        lv_obj_add_flag(s_city_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void ui_set_cities(const city_wx_t *c, int n)
+{
+    s_ncities = 0;
+    for (int i = 0; i < n && s_ncities < CITIES_MAX; i++) {
+        if (c[i].ok) {
+            s_cities[s_ncities++] = c[i];
+        }
+    }
+    if (s_city >= s_ncities) {
+        show(-1);
+    } else {
+        render_city();
+    }
+}
+
+// Normal cycle: dashboard, other cities, sensor pages, then each active message.
+// Position: -1 dashboard, then cities, sensor pages and messages in a row.
+static int cycle_pos(void)
+{
+    int nc = s_ncities, np = sens_pages();
+    return s_city >= 0 ? s_city : s_sens >= 0 ? nc + s_sens : s_idx >= 0 ? nc + np + s_idx : -1;
+}
+
+static void show_pos(int p)
+{
+    int nc = s_ncities, np = sens_pages();
+    if (p < 0) {
+        s_left = s_dash_s;
+        show(-1);
+    } else if (p < nc) {
+        s_left = s_city_s;
+        show_city(p);
+    } else if (p < nc + np) {
+        s_left = s_sens_s;
+        show_sensors(p - nc);
+    } else {
+        s_left = s_msg_s;
+        show(p - nc - np);
+    }
+}
+
 static void message_cycle(void)
 {
     if (!s_msg_panel || s_deleting) {
@@ -630,9 +1016,9 @@ static void message_cycle(void)
         }
         return;
     }
-    int pages = sens_pages();
-    if (s_n == 0 && pages == 0) {
-        if (s_idx >= 0 || s_sens >= 0) {
+    int total = s_ncities + sens_pages() + s_n;
+    if (total == 0) {
+        if (overlay_now() != OV_NONE) {
             show(-1);
         }
         return;
@@ -640,20 +1026,8 @@ static void message_cycle(void)
     if (--s_left > 0) {
         return;
     }
-    // order: dashboard, sensor pages, messages, dashboard
-    if (s_sens >= 0 ? s_sens + 1 < pages : (s_idx < 0 && pages > 0)) {
-        s_left = s_sens_s;
-        show_sensors(s_sens + 1);
-        return;
-    }
-    int next = s_sens >= 0 ? 0 : s_idx + 1;
-    if (next < s_n) {
-        s_left = s_msg_s;
-        show(next);
-    } else {
-        s_left = s_dash_s;
-        show(-1);
-    }
+    int p = cycle_pos() + 1;
+    show_pos(p < total ? p : -1);
 }
 
 // New or deleted message, or a schedule that started/ended
@@ -788,38 +1162,72 @@ void ui_delete_selected(void)
     lv_timer_set_repeat_count(t, 1);
 }
 
+static void sig_sweep_cb(lv_timer_t *t)
+{
+    if (s_config_mode || !s_sig || s_sig_sweep < 0) {
+        return;
+    }
+    s_sig_sweep = (s_sig_sweep + 1) % 5;   // 0..4 bars lit
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_style_bg_color(s_sig_bar[i], i < s_sig_sweep ? COLOR_ACCENT : lv_color_hex(0x3a4356), 0);
+    }
+}
+
 static void tick_cb(lv_timer_t *t)
 {
     if (s_config_mode) {
         return;
     }
     message_cycle();
+    if (s_card) {
+        update_card_info();
+    }
+    city_time_text();
     time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
 
     if (tm.tm_year >= (2024 - 1900)) {
-        lv_label_set_text_fmt(s_time, "%02d:%02d", tm.tm_hour, tm.tm_min);
-        lv_label_set_text_fmt(s_sec, "%02d", tm.tm_sec);
+        big_clock(s_time, s_ampm, tm.tm_hour, tm.tm_min);   // AM/PM above the seconds
+        label_fmt(s_sec, "%02d", tm.tm_sec);
         // the seconds follow the real width of HH:MM (Montserrat digits aren't monospaced)
         lv_obj_update_layout(s_time);
         lv_obj_align_to(s_sec, s_time, LV_ALIGN_OUT_RIGHT_BOTTOM, 3, -9);
         if (T->month_first) {
-            lv_label_set_text_fmt(s_date, "%s, %s %d %d", T->days[tm.tm_wday], T->months[tm.tm_mon],
+            label_fmt(s_date, "%s, %s %d %d", T->days[tm.tm_wday], T->months[tm.tm_mon],
                                   tm.tm_mday, tm.tm_year + 1900);
         } else {
-            lv_label_set_text_fmt(s_date, "%s, %d %s %d", T->days[tm.tm_wday], tm.tm_mday,
+            label_fmt(s_date, "%s, %d %s %d", T->days[tm.tm_wday], tm.tm_mday,
                                   T->months[tm.tm_mon], tm.tm_year + 1900);
         }
     }
 
     wifi_ap_record_t ap;
+    bool bars = false;
     if (s_toast[0] && lv_tick_elaps(s_toast_tick) < TOAST_MS) {
         lv_label_set_text(s_status, s_toast);
     } else if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        lv_label_set_text_fmt(s_status, LV_SYMBOL_WIFI " %s  %d dBm", (const char *)ap.ssid, ap.rssi);
+        label_fmt(s_status, LV_SYMBOL_WIFI " %s", (const char *)ap.ssid);
+        // signal as 1-4 bars, like a phone, instead of dBm
+        int level = ap.rssi >= -55 ? 4 : ap.rssi >= -65 ? 3 : ap.rssi >= -75 ? 2 : 1;
+        for (int i = 0; i < 4; i++) {
+            lv_obj_set_style_bg_color(s_sig_bar[i], i < level ? lv_color_white() : lv_color_hex(0x3a4356), 0);
+        }
+        bars = true;
     } else {
         lv_label_set_text(s_status, s_status_text);
+    }
+    // connected: the real level; connecting or reconnecting: sweeping bars (sig_sweep_cb)
+    if (bars) {
+        s_sig_sweep = -1;
+    } else if (s_sig_sweep < 0) {
+        s_sig_sweep = 0;
+    }
+    bool toast = s_toast[0] && lv_tick_elaps(s_toast_tick) < TOAST_MS;
+    if (toast) {
+        lv_obj_add_flag(s_sig, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(s_sig, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -898,6 +1306,9 @@ static void build(void)
     lv_obj_clean(lv_layer_top());
     s_msg_panel = NULL;
     s_sens_panel = NULL;
+    s_city_panel = NULL;
+    s_city_time = NULL;
+    s_city_ampm = NULL;
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
 
@@ -910,14 +1321,27 @@ static void build(void)
     bool landscape = w > h;
     int col_w = landscape ? 168 : w;   // clock + current weather column
 
-    s_status = label(scr, &font_pt_12, COLOR_MUTED);
-    lv_obj_set_width(s_status, col_w - 12);
-    lv_label_set_long_mode(s_status, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(s_status, 6, 4);
+    s_status = label(scr, &font_pt_14, COLOR_MUTED);
+    one_line(s_status, col_w - 34);
+    lv_obj_set_pos(s_status, 6, 2);
+    s_sig = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_sig);
+    lv_obj_set_size(s_sig, 19, 13);
+    lv_obj_set_pos(s_sig, col_w - 25, 4);
+    for (int i = 0; i < 4; i++) {
+        s_sig_bar[i] = lv_obj_create(s_sig);
+        lv_obj_remove_style_all(s_sig_bar[i]);
+        lv_obj_set_size(s_sig_bar[i], 3, 4 + i * 3);
+        lv_obj_set_style_radius(s_sig_bar[i], 1, 0);
+        lv_obj_set_style_bg_opa(s_sig_bar[i], LV_OPA_COVER, 0);
+        lv_obj_align(s_sig_bar[i], LV_ALIGN_BOTTOM_LEFT, i * 5, 0);
+    }
+    lv_obj_add_flag(s_sig, LV_OBJ_FLAG_HIDDEN);
 
     s_time = label(scr, &lv_font_montserrat_48, lv_color_white());
     lv_label_set_text(s_time, "--:--");
     lv_obj_set_pos(s_time, 8, 20);
+    s_ampm = label(scr, &font_pt_14, COLOR_ACCENT);
     s_sec = label(scr, &font_pt_20, COLOR_ACCENT);
     lv_obj_align_to(s_sec, s_time, LV_ALIGN_OUT_RIGHT_BOTTOM, 3, -9);
     s_date = label(scr, &font_pt_14, COLOR_MUTED);
@@ -927,19 +1351,19 @@ static void build(void)
     // weather now
     int now_h = landscape ? h - 96 : 92;
     lv_obj_t *now = card(scr, 6, 92, col_w - 12, now_h);
-    lv_obj_t *city = label(now, &font_pt_12, COLOR_MUTED);
-    lv_label_set_text_fmt(city, LV_SYMBOL_GPS " %s", g_cfg.city);
-    s_dot = dot(now, 14, COLOR_MUTED);
-    lv_obj_align(s_dot, LV_ALIGN_TOP_RIGHT, 0, 0);
+    // city, temperature and an animated icon instead of the weather's name
+    lv_obj_t *city = label(now, &font_pt_14, COLOR_MUTED);
+    one_line(city, col_w - 28);
+    label_fmt(city, LV_SYMBOL_GPS " %s", g_cfg.city);
     s_temp = label(now, &font_pt_28, lv_color_white());
     lv_label_set_text(s_temp, "--.-" DEG);
-    lv_obj_set_pos(s_temp, 0, 14);
-    s_desc = label(now, landscape ? &font_pt_12 : &font_pt_14, lv_color_white());
-    lv_obj_set_pos(s_desc, 0, landscape ? 46 : 48);
+    lv_obj_set_pos(s_temp, 0, landscape ? 22 : 17);
+    s_wicon = weather_icon_create(now);
+    lv_obj_align(s_wicon, LV_ALIGN_TOP_RIGHT, 2, landscape ? 16 : 10);
     s_extra = NULL;
     if (!landscape) {
-        s_extra = label(now, &font_pt_12, COLOR_MUTED);
-        lv_obj_set_pos(s_extra, 0, 64);
+        s_extra = label(now, &font_pt_14, COLOR_MUTED);
+        lv_obj_set_pos(s_extra, 0, 56);
     }
 
     // forecast
@@ -954,6 +1378,7 @@ static void build(void)
     render_forecast();
     build_message_panel(w, h);
     build_sensor_panel(w, h);
+    build_city_panel(w, h);
     s_lan_panel = NULL;   // lv_layer_top was cleaned above
     s_lan_msg = NULL;
     if (s_lan) {
@@ -968,10 +1393,12 @@ void ui_init(bool config_mode)
     s_dash_s = config_get_u8_def("t_dash", CYCLE_DEFAULT_S);
     s_sens_s = config_get_u8_def("t_sens", CYCLE_DEFAULT_S);
     s_msg_s = config_get_u8_def("t_msg", CYCLE_DEFAULT_S);
+    s_city_s = config_get_u8_def("t_city", CYCLE_DEFAULT_S);
     s_left = s_dash_s;
     strlcpy(s_status_text, T->starting, sizeof(s_status_text));
     build();
     lv_timer_create(tick_cb, 1000, NULL);
+    lv_timer_create(sig_sweep_cb, 250, NULL);
     if (!config_mode) {
         lv_timer_create(poll_cb, 200, NULL);
     }
@@ -1030,6 +1457,7 @@ void ui_set_fahrenheit(bool on)
     render_current();
     render_forecast();
     render_sensors();
+    render_city();
 }
 
 // ---------- setup page on the home network ----------
@@ -1048,7 +1476,7 @@ static void build_lan_panel(int w, int h)
     lv_obj_remove_flag(s_lan_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = label(s_lan_panel, &font_pt_14, COLOR_ACCENT);
-    lv_label_set_text_fmt(title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
+    label_fmt(title, LV_SYMBOL_SETTINGS "  %s", T->card_title);
     lv_obj_set_pos(title, 10, 8);
 
     lv_obj_t *qr = lv_qrcode_create(s_lan_panel);

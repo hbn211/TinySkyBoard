@@ -44,6 +44,7 @@ static int s_n;
 static int s_interval_s;
 static SemaphoreHandle_t s_lock;
 static volatile uint32_t s_version;
+static volatile int s_http;   // last API answer, for the status card
 
 static int64_t mono_s(void)
 {
@@ -52,7 +53,9 @@ static int64_t mono_s(void)
 
 static bool fetch_list(void)
 {
-    cJSON *root = net_http_json_hdr(API "/user/devices", NULL, KEY_HEADER, g_cfg.govee_key, 10000);
+    int http;
+    cJSON *root = net_http_json_hdr(API "/user/devices", NULL, KEY_HEADER, g_cfg.govee_key, 10000, &http);
+    s_http = http;
     cJSON *data = cJSON_GetObjectItem(root, "data");
     if (!cJSON_IsArray(data)) {
         cJSON_Delete(root);
@@ -137,7 +140,9 @@ static void poll_sensor(int i)
     char body[160];
     snprintf(body, sizeof(body), "{\"requestId\":\"tsb-%" PRIu32 "\",\"payload\":{\"sku\":\"%s\",\"device\":\"%s\"}}",
              ++req_id, t->sku, t->device);
-    cJSON *root = net_http_json_hdr(API "/device/state", body, KEY_HEADER, g_cfg.govee_key, 10000);
+    int http;
+    cJSON *root = net_http_json_hdr(API "/device/state", body, KEY_HEADER, g_cfg.govee_key, 10000, &http);
+    s_http = http;
     cJSON *caps = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "payload"), "capabilities");
     int64_t mono = mono_s();
     if (!cJSON_IsArray(caps)) {
@@ -206,8 +211,10 @@ static void poll_sensor(int i)
 
 static bool visible(int i, int64_t mono)
 {
+    // only after a change was seen: until then the value's age is unknown (could be hours, if the sensor died)
     const govee_track_t *t = &s_track[i];
-    return t->has_value && t->online && mono - t->alive_at <= (int64_t)GOVEE_STALE_UPLOADS * s_interval_s;
+    return t->has_value && s_sensors[i].changed_at && t->online &&
+           mono - t->alive_at <= (int64_t)GOVEE_STALE_UPLOADS * s_interval_s;
 }
 
 static void govee_task(void *arg)
@@ -263,6 +270,22 @@ int govee_get(govee_sensor_t *out, int max, bool all)
     }
     xSemaphoreGive(s_lock);
     return n;
+}
+
+govee_status_t govee_status(void)
+{
+    govee_status_t st = {.on = s_lock != NULL, .http = s_http};
+    if (!s_lock) {
+        return st;
+    }
+    int64_t mono = mono_s();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    st.sensors = s_n;
+    for (int i = 0; i < s_n; i++) {
+        st.shown += visible(i, mono);
+    }
+    xSemaphoreGive(s_lock);
+    return st;
 }
 
 uint32_t govee_version(void)

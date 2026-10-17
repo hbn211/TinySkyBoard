@@ -425,21 +425,12 @@ int msg_unread_count(void)
 
 void msg_clear_all(void)
 {
-    time_t now = time(NULL);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     memset(s_direct, 0, sizeof(s_direct));
     memset(s_unread_direct, 0, sizeof(s_unread_direct));
-    memset(s_unread_sched, 0, sizeof(s_unread_sched));
     save_direct();
     save_unread();
     update_led();
-    for (int i = 0; i < SCHED_MAX; i++) {
-        time_t occ;
-        if (sched_is_active(&s_sched[i], now, &occ)) {
-            s_dismissed[i] = occ;
-        }
-    }
-    save_sched_state();
     s_events |= MSG_EV_CHANGED;
     xSemaphoreGive(s_lock);
 }

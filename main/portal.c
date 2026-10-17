@@ -25,6 +25,39 @@ const char *portal_help_html(uint8_t lang);   // portal_help.c
 #define MAX_NETS            20
 
 static const char *TAG = "portal";
+
+// Pages are built from many small pieces; sending each one as its own chunk is slow over the home
+// network (each waits for the Wi-Fi) and the server gave up halfway. They're gathered here and sent
+// in 4 KB chunks. out(req, NULL) sends the rest and ends the response. One request at a time.
+static char s_out[4096];
+static size_t s_out_len;
+static httpd_req_t *s_out_req;
+
+static esp_err_t out(httpd_req_t *req, const char *str)
+{
+    if (req != s_out_req) {   // a new request: drop anything left from one that failed halfway
+        s_out_req = req;
+        s_out_len = 0;
+    }
+    esp_err_t err = ESP_OK;
+    size_t n = str ? strlen(str) : 0;
+    if (!str || s_out_len + n > sizeof(s_out)) {
+        if (s_out_len) {
+            err = httpd_resp_send_chunk(req, s_out, s_out_len);
+            s_out_len = 0;
+        }
+    }
+    if (!str) {
+        esp_err_t end = httpd_resp_send_chunk(req, NULL, 0);
+        return err != ESP_OK ? err : end;
+    }
+    if (n >= sizeof(s_out)) {   // bigger than the buffer (e.g. the help page): straight through
+        return httpd_resp_send_chunk(req, str, n);
+    }
+    memcpy(s_out + s_out_len, str, n);
+    s_out_len += n;
+    return err;
+}
 static char s_nets[MAX_NETS][33];
 static httpd_handle_t s_server;
 static esp_timer_handle_t s_lan_timer;   // home-network setup closes by itself
@@ -81,9 +114,9 @@ static void dns_task(void *arg)
 
 static void send_escaped(httpd_req_t *req, const char *s)
 {
-    char out[160];
+    char esc[160];
     size_t o = 0;
-    for (; *s && o < sizeof(out) - 7; s++) {
+    for (; *s && o < sizeof(esc) - 7; s++) {
         const char *rep = NULL;
         switch (*s) {
         case '&': rep = "&amp;"; break;
@@ -92,13 +125,13 @@ static void send_escaped(httpd_req_t *req, const char *s)
         case '"': rep = "&quot;"; break;
         }
         if (rep) {
-            o += strlcpy(out + o, rep, sizeof(out) - o);
+            o += strlcpy(esc + o, rep, sizeof(esc) - o);
         } else {
-            out[o++] = *s;
+            esc[o++] = *s;
         }
     }
-    out[o] = '\0';
-    httpd_resp_sendstr_chunk(req, out);
+    esc[o] = '\0';
+    out(req, esc);
 }
 
 static const char PAGE_HEAD[] =
@@ -144,16 +177,16 @@ static void send_head(httpd_req_t *req, uint8_t lang, bool help)
     const i18n_t *L = i18n_get(lang);
     char link[96];
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_sendstr_chunk(req, PAGE_HEAD);
+    out(req, PAGE_HEAD);
     snprintf(link, sizeof(link), "<nav><a class=h href='%s?lang=%s'>%s %s</a>", help ? "/" : "/ajuda",
              L->code, help ? "&larr;" : "?", help ? L->p_back_link : L->p_help_link);
-    httpd_resp_sendstr_chunk(req, link);
+    out(req, link);
     for (uint8_t i = 0; i < LANG_COUNT; i++) {
         snprintf(link, sizeof(link), "<a class='l%s' href='%s?lang=%s'>%s</a>", i == lang ? " on" : "",
                  help ? "/ajuda" : "/", i18n_get(i)->code, i18n_get(i)->code);
-        httpd_resp_sendstr_chunk(req, link);
+        out(req, link);
     }
-    httpd_resp_sendstr_chunk(req, "</nav>");
+    out(req, "</nav>");
 }
 
 // Brightness slider; moving it applies to the board right away (/preview), before saving
@@ -166,7 +199,7 @@ static void send_slider(httpd_req_t *req, const char *name, const char *label, i
              "oninput=\"document.getElementById('%s_v').textContent=this.value+'%%';"
              "fetch('/preview?%s='+this.value)\">",
              label, name, value, name, min, value, name, name);
-    httpd_resp_sendstr_chunk(req, html);
+    out(req, html);
 }
 
 // Time slider (screen cycle in s, sensor interval in min); no live preview: it only matters over time
@@ -180,7 +213,7 @@ static void send_time(httpd_req_t *req, const char *name, const char *label, int
              "<input type=range name=%s min=%d max=%d value=%d "
              "oninput=\"document.getElementById('%s_v').textContent=this.value+' %s'\">",
              label, name, value, unit, name, min, max, value, name, unit);
-    httpd_resp_sendstr_chunk(req, html);
+    out(req, html);
 }
 
 static void send_seconds(httpd_req_t *req, const char *name, const char *label)
@@ -199,24 +232,24 @@ static void send_rotation(httpd_req_t *req, const i18n_t *L)
             cur = i;
         }
     }
-    httpd_resp_sendstr_chunk(req, "<label>");
-    httpd_resp_sendstr_chunk(req, L->p_rotation);
-    httpd_resp_sendstr_chunk(req, "</label><div class=rot>");
+    out(req, "<label>");
+    out(req, L->p_rotation);
+    out(req, "</label><div class=rot>");
     for (int i = 0; i < 4; i++) {
         char html[200];
         snprintf(html, sizeof(html),
                  "<label class='ro%s'><input type=radio name=usb value=%d%s onchange=pick(this)>"
                  "<svg data-u=%d></svg>%s</label>",
                  i == cur ? " sel" : "", i, i == cur ? " checked" : "", i, L->p_usb[i]);
-        httpd_resp_sendstr_chunk(req, html);
+        out(req, html);
     }
-    httpd_resp_sendstr_chunk(req, "</div><small>");
-    httpd_resp_sendstr_chunk(req, L->p_btn_legend);
-    httpd_resp_sendstr_chunk(req, "<br>");
-    httpd_resp_sendstr_chunk(req, L->p_rotation_hint);
-    httpd_resp_sendstr_chunk(req, "</small>");
+    out(req, "</div><small>");
+    out(req, L->p_btn_legend);
+    out(req, "<br>");
+    out(req, L->p_rotation_hint);
+    out(req, "</small>");
     // drawing: upright board with USB at the bottom, rotated clockwise; the text always stays upright
-    httpd_resp_sendstr_chunk(req,
+    out(req,
         "<script>"
         "function pick(e){document.querySelectorAll('label.ro').forEach(function(l){l.classList.remove('sel')});"
         "e.parentNode.classList.add('sel');fetch('/preview?usb='+e.value)}"
@@ -266,9 +299,9 @@ static esp_err_t help_get(httpd_req_t *req)
 {
     uint8_t lang = page_lang(req);
     send_head(req, lang, true);
-    httpd_resp_sendstr_chunk(req, portal_help_html(lang));
-    httpd_resp_sendstr_chunk(req, "</body></html>");
-    return httpd_resp_sendstr_chunk(req, NULL);
+    out(req, portal_help_html(lang));
+    out(req, "</body></html>");
+    return out(req, NULL);
 }
 
 static esp_err_t root_get(httpd_req_t *req)
@@ -276,85 +309,98 @@ static esp_err_t root_get(httpd_req_t *req)
     uint8_t lang = page_lang(req);
     const i18n_t *L = i18n_get(lang);
     send_head(req, lang, false);
-    httpd_resp_sendstr_chunk(req, "<h1>");
-    httpd_resp_sendstr_chunk(req, L->p_title);
-    httpd_resp_sendstr_chunk(req, "</h1><form method=post action=/save><label>");
-    httpd_resp_sendstr_chunk(req, L->p_network);
-    httpd_resp_sendstr_chunk(req, "</label><input name=ssid list=nets required autocomplete=off value=\"");
+    out(req, "<h1>");
+    out(req, L->p_title);
+    out(req, "</h1><form method=post action=/save><label>");
+    out(req, L->p_network);
+    out(req, "</label><input name=ssid list=nets required autocomplete=off value=\"");
     send_escaped(req, g_cfg.ssid);
-    httpd_resp_sendstr_chunk(req, "\"><datalist id=nets>");
+    out(req, "\"><datalist id=nets>");
     for (int i = 0; i < s_n_nets; i++) {
-        httpd_resp_sendstr_chunk(req, "<option value=\"");
+        out(req, "<option value=\"");
         send_escaped(req, s_nets[i]);
-        httpd_resp_sendstr_chunk(req, "\">");
+        out(req, "\">");
     }
-    httpd_resp_sendstr_chunk(req, "</datalist><small>");
-    httpd_resp_sendstr_chunk(req, L->p_network_hint);
-    httpd_resp_sendstr_chunk(req, "</small><label>");
-    httpd_resp_sendstr_chunk(req, L->p_password);
-    httpd_resp_sendstr_chunk(req, "</label><input name=pass type=password autocomplete=off><small>");
-    httpd_resp_sendstr_chunk(req, L->p_password_hint);
-    httpd_resp_sendstr_chunk(req, "</small><label>");
-    httpd_resp_sendstr_chunk(req, L->p_city);
-    httpd_resp_sendstr_chunk(req, "</label><input name=city required value=\"");
+    out(req, "</datalist><small>");
+    out(req, L->p_network_hint);
+    out(req, "</small><label>");
+    out(req, L->p_password);
+    out(req, "</label><input name=pass type=password autocomplete=off><small>");
+    out(req, L->p_password_hint);
+    out(req, "</small><label>");
+    out(req, L->p_city);
+    out(req, "</label><input name=city required value=\"");
     send_escaped(req, g_cfg.city);
-    httpd_resp_sendstr_chunk(req, "\"><small>");
-    httpd_resp_sendstr_chunk(req, L->p_city_hint);
+    out(req, "\"><small>");
+    out(req, L->p_city_hint);
+    out(req, "</small><label>");
+    out(req, L->p_cities);
+    out(req, "</label><input name=cities maxlength=120 placeholder=\"Florian&oacute;polis, Tokyo\" value=\"");
+    send_escaped(req, g_cfg.cities);
+    out(req, "\"><small>");
+    out(req, L->p_cities_hint);
 
-    httpd_resp_sendstr_chunk(req, "</small><label>");
-    httpd_resp_sendstr_chunk(req, L->p_language);
-    httpd_resp_sendstr_chunk(req, "</label><select name=lang>");
+    out(req, "</small><label>");
+    out(req, L->p_language);
+    out(req, "</label><select name=lang>");
     for (uint8_t i = 0; i < LANG_COUNT; i++) {
         char opt[64];
         snprintf(opt, sizeof(opt), "<option value=%s%s>%s", i18n_get(i)->code,
                  i == lang ? " selected" : "", i18n_get(i)->name);
-        httpd_resp_sendstr_chunk(req, opt);
+        out(req, opt);
     }
 
-    httpd_resp_sendstr_chunk(req, "</select><label>");
-    httpd_resp_sendstr_chunk(req, L->p_unit);
-    httpd_resp_sendstr_chunk(req, "</label><select name=unit>");
+    out(req, "</select><label>");
+    out(req, L->p_unit);
+    out(req, "</label><select name=unit>");
     bool fahr = config_get_u8("fahr");
-    httpd_resp_sendstr_chunk(req, fahr ? "<option value=c>Celsius (°C)<option value=f selected>Fahrenheit (°F)"
+    out(req, fahr ? "<option value=c>Celsius (°C)<option value=f selected>Fahrenheit (°F)"
                                        : "<option value=c selected>Celsius (°C)<option value=f>Fahrenheit (°F)");
-    httpd_resp_sendstr_chunk(req, "</select>");
+    out(req, "</select>");
+    out(req, "<label>");
+    out(req, L->p_clock);
+    out(req, "</label><select name=h12>");
+    out(req, g_cfg.h12 ? "<option value=0>24 h (14:05)<option value=1 selected>12 h (2:05 PM)"
+                                            : "<option value=0 selected>24 h (14:05)<option value=1>12 h (2:05 PM)");
+    out(req, "</select>");
     send_rotation(req, L);
     send_slider(req, "bl_day", L->p_bright_day, 5, config_get_u8_def("bl_day", DIM_DEFAULT_DAY));
     send_slider(req, "bl_night", L->p_bright_night, 1, config_get_u8_def("bl_night", DIM_DEFAULT_NIGHT));
     send_slider(req, "led_lvl", L->p_bright_led, 0, config_get_u8_def("led_lvl", DIM_DEFAULT_LED));
     send_slider(req, "led_night", L->p_bright_led_night, 0, config_get_u8_def("led_night", DIM_DEFAULT_LED_NIGHT));
     send_slider(req, "led_alert", L->p_bright_alert, 0, config_get_u8_def("led_alert", DIM_DEFAULT_ALERT));
-    httpd_resp_sendstr_chunk(req, "<small>");
-    httpd_resp_sendstr_chunk(req, L->p_bright_hint);
-    httpd_resp_sendstr_chunk(req, "</small>");
+    out(req, "<small>");
+    out(req, L->p_bright_hint);
+    out(req, "</small>");
     send_seconds(req, "t_dash", L->p_t_dash);
+    send_seconds(req, "t_city", L->p_t_city);
     send_seconds(req, "t_sens", L->p_t_sens);
     send_seconds(req, "t_msg", L->p_t_msg);
-    httpd_resp_sendstr_chunk(req, "<small>");
-    httpd_resp_sendstr_chunk(req, L->p_t_hint);
-    httpd_resp_sendstr_chunk(req, "</small><label>");
-    httpd_resp_sendstr_chunk(req, L->p_tg);
-    httpd_resp_sendstr_chunk(req, "</label><input name=tg autocomplete=off placeholder=\"");
-    httpd_resp_sendstr_chunk(req, g_cfg.tg_token[0] ? L->p_tg_set : "123456789:ABC...");
-    httpd_resp_sendstr_chunk(req, "\"><small>");
-    httpd_resp_sendstr_chunk(req, L->p_tg_hint);
-    httpd_resp_sendstr_chunk(req, "</small><label>");
-    httpd_resp_sendstr_chunk(req, L->p_govee);
-    httpd_resp_sendstr_chunk(req, "</label><input name=govee autocomplete=off placeholder=\"");
-    httpd_resp_sendstr_chunk(req, g_cfg.govee_key[0] ? L->p_tg_set : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
-    httpd_resp_sendstr_chunk(req, "\"><small>");
-    httpd_resp_sendstr_chunk(req, L->p_govee_hint);
-    httpd_resp_sendstr_chunk(req, "</small>");
+    out(req, "<small>");
+    out(req, L->p_t_hint);
+    out(req, "</small><label>");
+    out(req, L->p_tg);
+    out(req, "</label><input name=tg autocomplete=off placeholder=\"");
+    out(req, g_cfg.tg_token[0] ? L->p_tg_set : "123456789:ABC...");
+    out(req, "\"><small>");
+    out(req, L->p_tg_hint);
+    out(req, "</small><label>");
+    out(req, L->p_govee);
+    out(req, "</label><input name=govee autocomplete=off placeholder=\"");
+    out(req, g_cfg.govee_key[0] ? L->p_tg_set : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
+    out(req, "\"><small>");
+    out(req, L->p_govee_hint);
+    out(req, "</small>");
     send_time(req, "govee_int", L->p_govee_int, 1, 60, GOVEE_DEFAULT_MIN, "min");
-    httpd_resp_sendstr_chunk(req, "<small>");
-    httpd_resp_sendstr_chunk(req, L->p_govee_int_hint);
-    httpd_resp_sendstr_chunk(req, "</small><button>");
-    httpd_resp_sendstr_chunk(req, L->p_save);
+    out(req, "<small>");
+    out(req, L->p_govee_int_hint);
+    out(req, "</small><button>");
+    out(req, L->p_save);
     char footer[96];
     snprintf(footer, sizeof(footer), "</button></form><p class=ver>TinySkyBoard v%s</p></body></html>",
              esp_app_get_description()->version);
-    httpd_resp_sendstr_chunk(req, footer);
-    return httpd_resp_sendstr_chunk(req, NULL);
+    out(req, footer);
+    return out(req, NULL);
 }
 
 static void url_decode(char *s)
@@ -392,7 +438,7 @@ static void restart_task(void *arg)
 
 static esp_err_t save_post(httpd_req_t *req)
 {
-    char body[1024];
+    static char body[1280];   // static: the server task has a small stack (one request at a time)
     int len = req->content_len < sizeof(body) - 1 ? req->content_len : sizeof(body) - 1;
     int got = 0;
     while (got < len) {
@@ -411,6 +457,10 @@ static esp_err_t save_post(httpd_req_t *req)
     form_value(body, "unit", unit, sizeof(unit));
     form_value(body, "tg", tg, sizeof(tg));
     form_value(body, "govee", govee, sizeof(govee));
+    char cities[sizeof(g_cfg.cities)];
+    if (form_value(body, "cities", cities, sizeof(cities))) {
+        strlcpy(g_cfg.cities, cities, sizeof(g_cfg.cities));
+    }
     form_value(body, "lang", lang, sizeof(lang));
 
     if (!ssid[0] || !city[0]) {
@@ -442,8 +492,12 @@ static esp_err_t save_post(httpd_req_t *req)
     } else if (govee[0]) {
         strlcpy(g_cfg.govee_key, govee, sizeof(g_cfg.govee_key));
     }
+    config_split_city();
     config_save();
     config_set_u8("fahr", unit[0] == 'f');
+    if (form_value(body, "h12", num, sizeof(num))) {
+        config_set_u8("h12", num[0] == '1');
+    }
     if (form_value(body, "usb", num, sizeof(num))) {
         int u = atoi(num);
         if (u >= 0 && u < 4) {
@@ -461,8 +515,8 @@ static esp_err_t save_post(httpd_req_t *req)
         int v = atoi(num);
         config_set_u8("govee_int", v < 1 ? 1 : v > 60 ? 60 : v);
     }
-    static const char *const TIMES[] = {"t_dash", "t_sens", "t_msg"};
-    for (int i = 0; i < 3; i++) {
+    static const char *const TIMES[] = {"t_dash", "t_city", "t_sens", "t_msg"};
+    for (int i = 0; i < 4; i++) {
         if (form_value(body, TIMES[i], num, sizeof(num))) {
             int v = atoi(num);
             config_set_u8(TIMES[i], v < CYCLE_MIN_S ? CYCLE_MIN_S : v > CYCLE_MAX_S ? CYCLE_MAX_S : v);
@@ -477,15 +531,15 @@ static esp_err_t save_post(httpd_req_t *req)
     ESP_LOGI(TAG, "saved: network '%s', city '%s'", g_cfg.ssid, g_cfg.city);
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_sendstr_chunk(req, PAGE_HEAD);
-    httpd_resp_sendstr_chunk(req, "<h1>");
-    httpd_resp_sendstr_chunk(req, T->p_saved_title);
-    httpd_resp_sendstr_chunk(req, "</h1><p>");
-    httpd_resp_sendstr_chunk(req, T->p_saved_pre);
+    out(req, PAGE_HEAD);
+    out(req, "<h1>");
+    out(req, T->p_saved_title);
+    out(req, "</h1><p>");
+    out(req, T->p_saved_pre);
     send_escaped(req, g_cfg.ssid);
-    httpd_resp_sendstr_chunk(req, T->p_saved_post);
-    httpd_resp_sendstr_chunk(req, "</p></body></html>");
-    httpd_resp_sendstr_chunk(req, NULL);
+    out(req, T->p_saved_post);
+    out(req, "</p></body></html>");
+    out(req, NULL);
 
     if (lvgl_port_lock(0)) {
         ui_config_message(T->saved_restarting);
@@ -507,6 +561,7 @@ static esp_err_t redirect_get(httpd_req_t *req)
 static bool http_start(bool captive)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.stack_size = 6144;   // the save handler parses the whole form
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {

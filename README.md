@@ -2,18 +2,23 @@
 
 A desk clock, weather station and message board for the
 [Waveshare ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm).
-It shows the time, current weather and a 5-day forecast, readings from your Govee Wi-Fi
-thermometers, and messages you send from your phone over Telegram — right away or on a schedule.
+It shows the time, current weather and a 5-day forecast, other cities' time and weather, readings
+from your Govee Wi-Fi thermometers, and messages you send from your phone over Telegram — right
+away or on a schedule.
 
 Everything is configured from your phone through a setup page served by the board itself:
 no reflashing when you move or change networks.
 
-**Version 1.1.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.2.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
 
-*Landscape layout, with the interface in Portuguese (English is the default).*
+*The dashboard in landscape: clock, weather now with an animated icon, and the 5-day forecast.*
+
+| Other city | Govee sensor | New message |
+|---|---|---|
+| ![Other city page](docs/images/city.jpg) | ![Govee sensor page](docs/images/sensor.jpg) | ![Unread message with emoji](docs/images/message.jpg) |
 
 | Setup page | Built-in help |
 |---|---|
@@ -22,13 +27,17 @@ the setup page and in the bot's `/status` reply.
 ## Features
 
 - **Clock and date** synced over NTP; the time zone (including daylight saving) is detected
-  from the city.
-- **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key.
+  from the city. 24-hour or 12-hour (AM/PM) format.
+- **Other cities** (optional, up to 4): a world-clock page per city with its local time, date,
+  time difference and weather.
+- **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key. An
+  animated icon shows the sky (sun or moon, drifting clouds, falling rain or snow, fog, lightning).
   Just type the city name; coordinates are looked up automatically.
 - **Govee thermometers** (optional, e.g. H5179): temperature, humidity, today's low/high and the
   trend over the last hour, with the time of the last upload. One sensor fills the screen; two
   share it. A sensor that stops reporting leaves the screen by itself.
-- **Telegram messages** on the screen. Up to 5 messages take turns with the dashboard.
+- **Telegram messages** on the screen, with **color emoji** (about 370 of the most used, from
+  Twemoji). Up to 5 messages take turns with the dashboard.
   The bot warns you when a message is too long to fit.
 - **Scheduled messages** (`/schedule`): a step-by-step assistant with quick-reply buttons —
   time, duration and repeat (once, every day, Mon–Fri, weekends).
@@ -38,9 +47,13 @@ the setup page and in the bot's `/status` reply.
 - **Day/night dimmer**: screen and LED brightness follow local sunrise and sunset, with a
   30-minute transition.
 - **RGB LED** in the color of the current weather, blinking white until new messages are read.
-- **Adjustable rotation**: how long the clock, sensor pages and messages stay on screen (5 s by default).
+- **Adjustable rotation**: how long the clock, other cities, sensor pages and messages stay on
+  screen (5 s by default).
+- **Status at a glance**: Wi-Fi signal bars on the dashboard, and a status list (IP, weather,
+  Telegram, Govee, uptime) on the **Set up over Wi-Fi** card.
 - **Setup portal**: the board creates its own Wi-Fi with a QR code on screen. Pick the network,
-  city, language, unit, board orientation and brightness (with live preview) from your phone.
+  city, other cities, language, unit, time format, board orientation, brightness (with live
+  preview), screen times, Telegram and Govee from your phone.
 - **Three languages** — English, Portuguese and Spanish — on the screen, the setup page and
   the bot.
 
@@ -98,14 +111,32 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 |---|---|
 | Quick press | Shows active message #1; each press goes to the next, then back to the dashboard. 10 s without pressing returns to normal. Opening a message this way marks it read (unread ones have an orange header). |
 | Hold 2 s on a message | Deletes it (a red bar fills while you hold; let go earlier to cancel). |
+| Quick press past the last message | Shows the **Set up over Wi-Fi** card: a gear on the button side and a status list — IP address, last weather update, Telegram, Govee (invalid key, sensors on screen) and uptime. |
 | Hold 2 s on the **Set up over Wi-Fi** card (after the last message) | Opens the setup page on your home network and shows a QR code with the board's address. A click closes it; it closes by itself after 10 minutes. |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
 ### Screen rotation
 
-The screens take turns: **clock and weather → Govee sensor pages → messages → clock**. Pages that
-have nothing to show are skipped. Each screen stays 5 s by default; change it on the setup page
-(2–30 s). A new message stays 20 s the first time.
+The screens take turns: **clock and weather → other cities → Govee sensor pages → messages →
+clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
+on the setup page (2–30 s). A new message stays 20 s the first time.
+
+### Dashboard
+
+- **Top bar:** Wi-Fi network with 1–4 signal bars (≥ −55, −65, −75 dBm, weaker). While
+  connecting, blue bars light up one by one next to the network name.
+- **Clock** (24 h, or 12 h with AM/PM next to the seconds) and date.
+- **Weather now:** city, temperature and an animated icon — sun with a glow (moon at night),
+  drifting clouds, falling rain or snow, fog bars, lightning — plus humidity and wind in portrait.
+- **Forecast:** today and the next 4 days with a weather icon, high (white) and low (gray).
+
+### Other cities
+
+Type them on the setup page under **Other cities**, separated by commas (up to 4), e.g.
+`Florianópolis, Tokyo`. Empty (the default) turns the feature off. Each city gets a page with its
+local time, date and difference to yours (e.g. `-4h`), and its weather (animated icon with day or
+night there, temperature, today's low and high). Coordinates and time zone come from Open-Meteo,
+daylight saving included, and are refreshed with the weather.
 
 ### Govee sensors
 
@@ -124,7 +155,8 @@ its last value after the battery dies. So the panel works from **changes**:
 
 - It polls every 5 s until the value changes (that's the upload), then sleeps until 30 s before
   the next expected upload. That's roughly 1,000 requests per sensor per day.
-- **"updated HH:MM"** is when the reading last changed.
+- **"updated HH:MM"** is when the reading last changed. After power-on, a sensor only shows up
+  once its reading changes (up to one interval), so a value of unknown age is never shown.
 - A sensor with no change for 3 intervals (30 min by default) leaves the screen until it changes
   again. `/status` still lists it, with a warning.
 
@@ -158,7 +190,8 @@ language.
 | `/schedule` | `/agendar` | `/programar` | Schedule a message |
 | `/list` | `/agenda` | `/lista` | List what is scheduled |
 | `/cancel N` | `/cancelar N` | `/cancelar N` | Delete schedule N |
-| `/clear` | `/limpar` | `/borrar` | Remove all messages from the screen |
+| `/messages` | `/mensagens` | `/mensajes` | Messages on the screen and whether they were read |
+| `/clear` | `/limpar` | `/borrar` | Delete the sent messages (scheduled ones stay) |
 | `/status`, `/ping` | `/status` | `/estado` | Is it on? Uptime, Wi-Fi, weather, Govee sensors |
 | `/help` | `/ajuda` | `/ayuda` | List the commands |
 
@@ -188,30 +221,40 @@ main/
   main.c          boot, control button
   board.c/.h      LCD (ST7789 + LVGL), backlight, RGB LED, pins
   ui.c            dashboard, message screen, setup-mode screen
-  net.c           Wi-Fi, NTP, Open-Meteo weather and geocoding, HTTPS helper
+  net.c           Wi-Fi, NTP, Open-Meteo weather (main and other cities), geocoding, HTTPS helper
   telegram.c      bot: messages, commands, /schedule assistant, uptime notices
   govee.c         Govee thermometers: polling in sync with the uploads, trend, day range
   schedule.c/.h   active messages and schedules
+  weather_icon.c  animated weather icon (Twemoji sun/moon/cloud + LVGL drops, flakes, lightning)
   dimmer.c        day/night brightness from sunrise/sunset
   led.c           RGB LED
   portal.c        setup mode: access point, captive DNS, setup page
   portal_help.c   help page
   config.c/.h     settings in NVS
   i18n.c/.h       all user-facing texts (en, pt, es)
+  emoji/          color emoji: generated images (emoji.bin) and their index
   fonts/          Montserrat with Latin-1 accents + LVGL symbols
 tools/
   govee_probe.py  checks the Govee API from a computer (standard library only)
+  gen_emoji.py    builds main/emoji from emoji_list.txt
 partitions.csv    single 3.9 MB app partition
 sdkconfig.defaults
 ```
 
 The fonts in `main/fonts/` were generated with
 [lv_font_conv](https://github.com/lvgl/lv_font_conv) from Montserrat Medium and Font Awesome
-(the exact command is in the header of each file). Emoji aren't included, so the bot drops them.
+(the exact command is in the header of each file).
+
+The color emoji in `main/emoji/` are [Twemoji](https://github.com/jdecked/twemoji) images
+converted to LVGL's RGB565A8 format in three sizes (16, 22 and 28 px) and drawn through an LVGL
+image font that is the fallback of the message fonts. The set is listed in `tools/emoji_list.txt`;
+to change it, edit the list and run `python3 tools/gen_emoji.py` (needs Pillow). Emoji outside the
+set are dropped and the bot says so; skin tones show in the default tone, and in combined emoji
+(people with professions, families, flags) only the first part shows.
 
 ## Known limitations
 
-- Emoji don't show on the screen (accents do).
+- Only the emoji in `tools/emoji_list.txt` show; flags and combined emoji don't.
 - One owner per bot.
 - Govee low/high and trend start over when the panel restarts (the API has no history).
 - If a Govee sensor reports exactly the same temperature and humidity for 3 uploads in a row, it
@@ -231,6 +274,7 @@ This project is released under the [MIT License](LICENSE). It builds on:
 | [cJSON](https://github.com/DaveGamble/cJSON) | MIT |
 | [Montserrat](https://github.com/JulietaUla/Montserrat) font | SIL Open Font License 1.1 |
 | [Font Awesome Free](https://fontawesome.com/) icons (via LVGL) | SIL OFL 1.1 (font), CC BY 4.0 (icons) |
+| [Twemoji](https://github.com/jdecked/twemoji) emoji graphics, © Twitter, Inc. and other contributors | CC BY 4.0 |
 
 Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The free Open-Meteo API is for

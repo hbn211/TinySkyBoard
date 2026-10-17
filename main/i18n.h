@@ -27,13 +27,27 @@ typedef struct {
     const char *humidity_wind_fmt;  // %d humidity, %.0f wind
     const char *unit_fmt;           // %c = C/F
     const char *msg_title;
-    const char *msg_today_fmt;      // %02d:%02d
+    const char *msg_today_fmt;      // %s = time
     const char *msg_none;
     const char *msg_browse_hint;
     const char *msg_deleted;
     const char *msg_unread_tag;     // "new" in the header of unread messages
     const char *card_title;         // browse card after the last message: setup on the home network
     const char *card_hint;
+    // status on the setup card
+    const char *info_wifi_off;
+    const char *info_weather_fmt;   // %s = time of the last update
+    const char *info_weather_wait;
+    const char *info_tg_off;
+    const char *info_tg_wait;
+    const char *info_tg_ok;
+    const char *info_tg_fail;
+    const char *info_gv_off;
+    const char *info_gv_wait;
+    const char *info_gv_key;        // the API refuses the key
+    const char *info_gv_err_fmt;    // %d = HTTP status (-1 = no answer)
+    const char *info_gv_ok_fmt;     // %d on screen, %d sensors
+    const char *info_up_fmt;        // %s = uptime
     const char *lan_step;
     const char *lan_close;
     const char *lan_failed;
@@ -46,10 +60,11 @@ typedef struct {
     const char *restarting;
     const char *saved_restarting;
     const char *wifi_lost;
-    const char *connecting_fmt;     // %s = network
     const char *no_wifi_portal;
     const char *finding_city;
     const char *city_not_found_fmt; // %s = city
+    const char *city_same_time;
+    const char *city_minmax_fmt;    // %.0f min, %.0f max     // other city in the same time zone
     const char *sens_title;         // Govee sensors screen
     const char *sens_updated_fmt;   // %s = time of the last new reading
     const char *sens_wait;
@@ -65,10 +80,14 @@ typedef struct {
     const char *p_city;
     const char *p_city_hint;
     const char *p_unit;
+    const char *p_clock;
     const char *p_language;
     const char *p_tg;
     const char *p_tg_set;
     const char *p_tg_hint;
+    const char *p_cities;
+    const char *p_cities_hint;
+    const char *p_t_city;
     const char *p_govee;
     const char *p_govee_hint;
     const char *p_govee_int;
@@ -102,6 +121,10 @@ typedef struct {
     const char *tg_only_text;
     const char *tg_cleared;
     const char *tg_no_glyphs;
+    const char *tg_msgs_title;      // /mensagens
+    const char *tg_msg_read;
+    const char *tg_msg_unread;
+    const char *tg_some_dropped;    // part of the message (emoji the panel doesn't have) was left out
     const char *tg_ok;
     const char *tg_ok_count_fmt;    // %d active messages
     const char *tg_too_long_fmt;    // %d characters, %d fit

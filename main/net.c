@@ -82,10 +82,13 @@ static void wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
     ESP_ERROR_CHECK(esp_wifi_start());
+    // no modem sleep: the board runs on USB, and sleep made the setup page stall over the home network
+    esp_wifi_set_ps(WIFI_PS_NONE);
     led_solid(0x0000ff);
 
+    // just the network name: the signal bars next to it sweep while connecting
     char status[64];
-    snprintf(status, sizeof(status), T->connecting_fmt, g_cfg.ssid);
+    snprintf(status, sizeof(status), LV_SYMBOL_WIFI " %s", g_cfg.ssid);
     set_status(status);
 }
 
@@ -111,11 +114,11 @@ static esp_err_t http_event(esp_http_client_event_t *e)
 
 cJSON *net_http_json(const char *url, const char *post_body, int timeout_ms)
 {
-    return net_http_json_hdr(url, post_body, NULL, NULL, timeout_ms);
+    return net_http_json_hdr(url, post_body, NULL, NULL, timeout_ms, NULL);
 }
 
 cJSON *net_http_json_hdr(const char *url, const char *post_body, const char *hdr, const char *hdr_value,
-                         int timeout_ms)
+                         int timeout_ms, int *status_out)
 {
     resp_t resp = {.buf = calloc(1, RESP_MAX)};
     if (!resp.buf) {
@@ -140,6 +143,9 @@ cJSON *net_http_json_hdr(const char *url, const char *post_body, const char *hdr
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    if (status_out) {
+        *status_out = err == ESP_OK ? status : -1;
+    }
     if (err != ESP_OK || status != 200) {
         // host only: the Telegram URL carries the bot token
         const char *host = url + strlen("https://");
@@ -197,10 +203,10 @@ void net_url_encode(const char *in, char *out, size_t size)
 // City -> latitude/longitude via Open-Meteo geocoding.
 // Searches in Portuguese, English and Spanish and keeps the most populous result; otherwise
 // "Lisboa" lands in Mozambique and "Munich" doesn't match "Munique".
-static bool geocode_city(void)
+static bool geocode(const char *city, double *lat_out, double *lon_out)
 {
     char name[3 * sizeof(g_cfg.city)];
-    net_url_encode(g_cfg.city, name, sizeof(name));
+    net_url_encode(city, name, sizeof(name));
 
     static const char *LANGS[] = {"pt", "en", "es"};
     double best_pop = -1, lat = 0, lon = 0;
@@ -224,10 +230,21 @@ static bool geocode_city(void)
     if (best_pop < 0) {
         return false;
     }
+    *lat_out = lat;
+    *lon_out = lon;
+    ESP_LOGI(TAG, "city '%s' -> %.4f, %.4f (pop %.0f)", city, lat, lon, best_pop);
+    return true;
+}
+
+static bool geocode_city(void)
+{
+    double lat, lon;
+    if (!geocode(g_cfg.city, &lat, &lon)) {
+        return false;
+    }
     snprintf(g_cfg.lat, sizeof(g_cfg.lat), "%.4f", lat);
     snprintf(g_cfg.lon, sizeof(g_cfg.lon), "%.4f", lon);
     config_save();
-    ESP_LOGI(TAG, "city '%s' -> %s, %s (pop %.0f)", g_cfg.city, g_cfg.lat, g_cfg.lon, best_pop);
     return true;
 }
 
@@ -287,6 +304,7 @@ static bool fetch_weather(weather_t *out)
             d->temp_min = json_at(daily, "temperature_2m_min", i);
         }
         out->updated_at = time(NULL);
+        out->utc_offset = (int)json_num(root, "utc_offset_seconds");
         ESP_LOGI(TAG, "weather: %.1f C, code %d, %d days", out->temp, out->code, out->n_days);
 
         // today's sunrise/sunset, in the city's local time ("2026-10-13T07:28")
@@ -306,6 +324,62 @@ static bool fetch_weather(weather_t *out)
     }
     cJSON_Delete(root);
     return ok;
+}
+
+// ---------- other cities ----------
+
+static city_wx_t s_cities[CITIES_MAX];
+static double s_city_lat[CITIES_MAX], s_city_lon[CITIES_MAX];
+static bool s_city_geo[CITIES_MAX];
+static int s_ncities;
+
+// "Florianópolis, Tokyo" -> names (trimmed, up to CITIES_MAX)
+static void parse_cities(void)
+{
+    char list[sizeof(g_cfg.cities)];
+    strlcpy(list, g_cfg.cities, sizeof(list));
+    s_ncities = 0;
+    for (char *save, *tok = strtok_r(list, ",;", &save); tok && s_ncities < CITIES_MAX;
+         tok = strtok_r(NULL, ",;", &save)) {
+        tok += strspn(tok, " ");
+        for (char *e = tok + strlen(tok); e > tok && e[-1] == ' '; *--e = '\0') {
+        }
+        if (*tok) {
+            strlcpy(s_cities[s_ncities].name, tok, sizeof(s_cities[s_ncities].name));
+            s_ncities++;
+        }
+    }
+}
+
+static void fetch_city(int i)
+{
+    city_wx_t *c = &s_cities[i];
+    if (!s_city_geo[i]) {
+        s_city_geo[i] = geocode(c->name, &s_city_lat[i], &s_city_lon[i]);
+        if (!s_city_geo[i]) {
+            return;
+        }
+    }
+    char url[300];
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+             "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min"
+             "&timezone=auto&forecast_days=1",
+             s_city_lat[i], s_city_lon[i]);
+    cJSON *root = net_http_json(url, NULL, 10000);
+    const cJSON *cur = cJSON_GetObjectItem(root, "current");
+    const cJSON *daily = cJSON_GetObjectItem(root, "daily");
+    if (cur && daily) {
+        c->utc_offset = (int)json_num(root, "utc_offset_seconds");
+        c->temp = json_num(cur, "temperature_2m");
+        c->code = (int)json_num(cur, "weather_code");
+        c->is_day = json_num(cur, "is_day") != 0;
+        c->tmax = json_at(daily, "temperature_2m_max", 0);
+        c->tmin = json_at(daily, "temperature_2m_min", 0);
+        c->ok = true;
+        ESP_LOGI(TAG, "%s: %.1f C, code %d, UTC%+d min", c->name, c->temp, c->code, c->utc_offset / 60);
+    }
+    cJSON_Delete(root);
 }
 
 static void net_task(void *arg)
@@ -359,6 +433,13 @@ static void net_task(void *arg)
             s_weather_color = ui_weather_color(w.code);
             led_solid(s_weather_color);
         }
+        for (int i = 0; i < s_ncities; i++) {
+            fetch_city(i);
+        }
+        if (s_ncities && lvgl_port_lock(0)) {
+            ui_set_cities(s_cities, s_ncities);
+            lvgl_port_unlock();
+        }
         vTaskDelay(pdMS_TO_TICKS(ok ? WEATHER_PERIOD_MS : WEATHER_RETRY_MS));
     }
 }
@@ -368,6 +449,7 @@ void net_start(void)
     setenv("TZ", g_cfg.tz, 1);
     tzset();
 
+    parse_cities();
     s_events = xEventGroupCreate();
     wifi_init();
     xTaskCreate(net_task, "net", 8192, NULL, 4, NULL);

@@ -21,7 +21,19 @@ typedef struct {
     forecast_day_t days[FORECAST_DAYS];
     int n_days;
     time_t updated_at;
+    int utc_offset;     // seconds, from Open-Meteo (DST included)
 } weather_t;
+
+// Other cities (optional, setup page): local time and weather
+#define CITIES_MAX 4
+typedef struct {
+    char name[32];
+    bool ok;            // has data (utc_offset is valid)
+    int utc_offset;
+    float temp, tmax, tmin;
+    int code;
+    bool is_day;
+} city_wx_t;
 
 #define PORTAL_AP_SSID  "TinySkyBoard"
 #define PORTAL_AP_IP    "192.168.4.1"
@@ -30,6 +42,7 @@ typedef struct {
 void ui_init(bool config_mode);
 void ui_rebuild(void);   // rebuilds the screen for the display's current orientation
 void ui_set_weather(const weather_t *w);
+void ui_set_cities(const city_wx_t *c, int n);
 void ui_set_status(const char *text);
 void ui_set_fahrenheit(bool on);
 void ui_toast(const char *text);          // temporary message in the status bar
@@ -46,6 +59,13 @@ bool ui_lan_setup_active(void);
 bool ui_text_fits(const char *text, int *max_chars);   // fits the screen in any rotation?
 uint32_t ui_weather_color(int code);   // RGB color 0xRRGGBB for the WMO code
 const char *ui_weather_text(int code);  // description in the active language
+
+// weather_icon.c — animated weather icon (46x44) on the dashboard; LVGL lock held
+// kinds = T->weather indexes
+enum { WX_CLEAR, WX_PARTLY, WX_CLOUDY, WX_FOG, WX_DRIZZLE, WX_RAIN, WX_SNOW, WX_SHOWERS, WX_THUNDER };
+int weather_kind(int code);   // WMO code -> WX_*
+struct _lv_obj_t *weather_icon_create(struct _lv_obj_t *parent);
+void weather_icon_set(struct _lv_obj_t *box, int kind, bool day);
 
 // led.c — RGB LED on the back of the board
 void led_start(void);
@@ -67,20 +87,23 @@ void led_set_level(uint8_t percent);   // max brightness, 0 = off
 #define CYCLE_MAX_S        30
 void dimmer_start(bool follow_sun);     // false = only applies the day brightness (setup mode)
 void dimmer_set_sun(time_t sunrise, time_t sunset);
+bool dimmer_is_day(void);   // between sunrise and sunset (true while unknown)
 
 // net.c
 void net_start(void);
 // HTTPS + JSON parse of the response; GET if post_body is NULL, otherwise POST with a JSON body.
 // NULL on error. Free with cJSON_Delete.
 struct cJSON *net_http_json(const char *url, const char *post_body, int timeout_ms);
-// Same, with one extra request header (e.g. an API key)
+// Same, with one extra request header (e.g. an API key); status_out (optional): HTTP status, -1 = no answer
 struct cJSON *net_http_json_hdr(const char *url, const char *post_body, const char *hdr, const char *hdr_value,
-                                int timeout_ms);
+                                int timeout_ms, int *status_out);
 void net_url_encode(const char *in, char *out, size_t size);
 bool net_get_weather(weather_t *out);   // last downloaded weather
 
 // telegram.c — receives bot messages and shows them on the panel
 void telegram_start(void);
+typedef enum { TG_OFF, TG_CONNECTING, TG_OK, TG_FAILING } tg_state_t;
+tg_state_t telegram_state(void);
 
 // govee.c — Govee thermometers (cloud OpenAPI)
 // The API has no timestamp and keeps answering online with the last value after a sensor dies,
@@ -94,7 +117,7 @@ typedef struct {
     char name[32];
     float temp_c;
     float humidity;         // -1 = the sensor has none
-    time_t changed_at;      // when a new reading was seen; 0 = none since power-on yet
+    time_t changed_at;      // when a new reading was seen; 0 = none since power-on yet (not shown)
     float day_min, day_max; // today's range (seen by the panel since midnight or since it powered on)
     int trend;              // temperature over the last hour: 1 rising, -1 falling, 0 steady
     bool has_trend;         // false until there's ~30 min of history
@@ -104,6 +127,13 @@ void govee_start(void);
 // sensors with a reading, in the account's order; all = false: only the ones to show on the screen
 int govee_get(govee_sensor_t *out, int max, bool all);
 uint32_t govee_version(void);   // changes when there's new data (UI polls it)
+typedef struct {
+    bool on;            // has a key (task running)
+    int http;           // last API answer: 200 ok, 401 bad key, -1 no answer, 0 none yet
+    int sensors;        // thermometers on the account
+    int shown;          // of those, on the screen
+} govee_status_t;
+govee_status_t govee_status(void);
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);
