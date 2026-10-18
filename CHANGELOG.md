@@ -1,55 +1,47 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-10-18
 
+- **Weather details page** after the dashboard, with widget-like tiles: feels-like (with the actual
+  temperature), UV index (today's max at night), European air quality with a level bar, and the
+  chance of rain for each of the next 6 hours. On by default; option and screen time on the setup page.
+- **Night mode** (optional, 00:00–06:00 by default): only a large amber clock and the LED off; a new
+  message or a click wakes the panel for a few seconds. An unread reminder keeps it awake, taking
+  turns with the night clock, with the LED breathing red until it's read. A **Night mode** card
+  turns it on now (a nap) or off for tonight with a 2 s hold.
+- **Work forecast** (optional): the weather in the city where you work, on chosen weekdays and
+  hours, with rain chance and temperature for the next 12 hours.
+- **Schedule card**: browse the scheduled messages on the panel and delete today's occurrence or
+  the whole series with a hold bar that acts on release (nothing / today / all / nothing).
 - **✅ Done in Telegram**: `/schedule` asks whether the reminder should also arrive in Telegram when
   it starts, with a button that clears it from the screen. Deleting it on the panel relabels the
   button ("Done on the panel"); `/list` marks these schedules with 🔔.
-- **Work forecast** (optional): the weather in the city where you work, on chosen weekdays and
-  hours, with rain chance and temperature for the next 12 hours.
-- Work and night-mode times take minutes (e.g. 12:15–13:45) with the phone's time picker.
-- The serial log no longer shows the Wi-Fi name or Telegram chat ids.
-- Long city names on the dashboard roll instead of being cut.
-- **Sensor comparisons**: pick up to two pairs of Govee sensors on the setup page; each gets a page
-  with the difference (A − B, colored warmer/cooler) and both readings.
-- Schedule browser: medium font at least (long texts roll slowly instead of shrinking) and more time
-  to read (20 s plus 1 s per 4 characters, up to two minutes); a rolling text finishes its turn
-  before the panel goes back to normal.
-- **Schedule card** after the night-mode card: browse the scheduled messages on the panel and
-  delete today's occurrence or the whole series with a hold bar that acts on release
-  (nothing / delete today / delete all / nothing). `/list` also shows "next one skipped".
-- Weather details page redesigned with widget-like tiles (feels like with the actual temperature,
-  UV and air with a level bar) and the rain chart across the width.
-### Fixes
-
-- After a failed air-quality fetch the last value stays on screen for at most one hour.
-- A click before the Wi-Fi connected restarted the panel (the message list wasn't loaded yet); saved
-  messages now show from power-on. Clicks during network work are no longer lost.
-- The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual
-  WS2812 GRB): the reminder's red breathing looked green, and so did "Wi-Fi down".
-- Free memory could drop to about 1 KB when several HTTPS connections overlapped, so the weather
-  failed to load; TLS buffers are now allocated only while data moves (lowest free memory ~49 KB).
-  `/status` and the log show free / lowest / largest block.
-- Turning night mode on from its card started the clock only ~20 s later.
-- `/list` said a schedule was "on the panel now" after today's occurrence had been deleted with the
-  button; it now says "deleted from the screen today".
-- At night a new message shows alone and a reminder takes turns only with the night clock (no weather
-  pages unless you click).
-
 - **Telegram alerts for the Govee sensors**: min/max temperature and humidity per sensor on the
   setup page (saved by sensor ID); one message when a reading leaves the range and one when it's
   back, with a small margin so it doesn't repeat. Optional message when a sensor stops sending.
 - **Rain alert**, turned on/off with `/rain` (`/chuva`, `/lluvia`): 60 % chance or more within the
   next 2 hours, at most every 6 hours.
-- Portrait: the message header shows the date/time on a second line; long titles (message,
-  weather details, other cities, status list) scroll instead of being cut.
-- **Night mode** (optional, setup page, 00:00–06:00 by default): only a large amber clock that fills
-  the screen and the LED off; a new message or a click wakes the panel for a few seconds, and an
-  unread scheduled message (a reminder) keeps it awake, with the LED breathing red, until it's read.
-  A **Night mode** card after the setup card turns it on now (a nap) or off for tonight with a 2 s hold.
-- **Weather details page** after the dashboard: feels-like temperature, UV index (today's max at
-  night), European air quality index and the chance of rain for each of the next 6 hours, with
-  the usual color scales. On by default; option and screen time on the setup page.
+- **Sensor comparisons**: pick up to two pairs of Govee sensors; each gets a page with the
+  difference (A − B, colored warmer/cooler) and both readings.
+- Setup page grouped in titled sections, shown as two columns of cards on a computer screen. Work
+  and night-mode times take minutes (e.g. 12:15–13:45) with the phone's time picker.
+- Portrait: the message header shows the date/time on a second line; long titles and city names
+  roll instead of being cut. Long scheduled texts roll slowly in a medium font and get more time
+  to read (20 s plus 1 s per 4 characters, up to two minutes).
+- `/list` shows "deleted from the screen today" / "next one skipped"; `/status` shows free / lowest /
+  largest memory block. The serial log no longer shows the Wi-Fi name or Telegram chat ids.
+
+### Fixes
+
+- A click before the Wi-Fi connected restarted the panel (the message list wasn't loaded yet); saved
+  messages now show from power-on. Clicks during network work are no longer lost.
+- The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual
+  WS2812 GRB).
+- Free memory could drop to about 1 KB when several HTTPS connections overlapped, so the weather
+  failed to load; TLS buffers are now allocated only while data moves (lowest free memory ~45 KB).
+- After a failed air-quality fetch the last value stays on screen for at most one hour.
+- Turning night mode on from its card started the clock only ~20 s later.
+- At night a new message shows alone and a reminder takes turns only with the night clock.
 
 ## 1.2.0 — 2026-10-17
 
