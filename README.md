@@ -253,8 +253,9 @@ its last value after the battery dies. So the panel works from **changes**:
   the next expected upload. That's roughly 1,000 requests per sensor per day.
 - **"updated HH:MM"** is when the reading last changed. After power-on, a sensor only shows up
   once its reading changes (up to one interval), so a value of unknown age is never shown.
-- A sensor with no change for 3 intervals (30 min by default) leaves the screen until it changes
-  again. `/status` still lists it, with a warning.
+- A sensor whose reading doesn't change at all for **12 hours** leaves the screen until it changes
+  again (`/status` still lists it, with a warning). An indoor sensor can repeat the same value for a
+  while, which looks like silence; 12 hours always cross the day's low or high.
 
 **Alerts on Telegram.** Under **Sensor alerts** on the setup page, each sensor has a min/max
 temperature (in the panel's unit) and min/max humidity; leave blank what you don't want to watch.
@@ -380,8 +381,8 @@ set are dropped and the bot says so; skin tones show in the default tone, and in
 - Only the emoji in `tools/emoji_list.txt` show; flags and combined emoji don't.
 - One owner per bot, plus up to 4 invited people.
 - Govee low/high and trend start over when the panel restarts (the API has no history).
-- If a Govee sensor reports exactly the same temperature and humidity for 3 uploads in a row, it
-  leaves the screen until the next change.
+- A dead Govee sensor is only noticed after 12 hours without any change (the API doesn't say when
+  a reading was taken).
 - The board-position picker assumes rotation 0 is "USB at the bottom". If "left" and "right"
   come out swapped on your board, swap the 1 and the 3 in `BOARD_USB_TO_ROT` (`main/board.h`).
 

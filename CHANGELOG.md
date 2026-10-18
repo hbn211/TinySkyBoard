@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Govee: a sensor only counts as stopped (leaves the screen, "stopped" alert) after 12 hours without
+  any change. Indoors the reading can stay the same for several uploads, which sent alert/back pairs
+  every few minutes.
+
 ## 1.5.0 — 2026-10-18
 
 - **Slide transitions**: a new page slides in from the right and the old one out to the left; the

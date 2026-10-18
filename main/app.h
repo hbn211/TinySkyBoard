@@ -153,7 +153,10 @@ tg_state_t telegram_state(void);
 #define GOVEE_MAX            8
 #define GOVEE_FAST_S         5    // polling while waiting for an upload
 #define GOVEE_DEFAULT_MIN    10   // the sensor's upload interval (Govee app setting), NVS "govee_int"
-#define GOVEE_STALE_UPLOADS  3    // no change in this many intervals = gone from the screen
+// no change at all for this long = the sensor stopped (screen and alert). The API has no reading time, so
+// only a change shows an upload; an indoor sensor can repeat its value for a while, but 12 h always
+// cross a daily low or high
+#define GOVEE_SILENT_S  (12 * 3600)
 typedef struct {
     char name[32];
     char device[24];        // Govee device ID

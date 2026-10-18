@@ -383,7 +383,7 @@ static bool visible(int i, int64_t mono)
     // (each flicker meant a "stopped sending" alert), and it stays on after the battery dies.
     const govee_track_t *t = &s_track[i];
     return t->has_value && s_sensors[i].changed_at &&
-           mono - t->alive_at <= (int64_t)GOVEE_STALE_UPLOADS * s_interval_s;
+           mono - t->alive_at <= GOVEE_SILENT_S;
 }
 
 static void govee_task(void *arg)
@@ -414,7 +414,7 @@ static void govee_task(void *arg)
                 if (!v && s_alert_silent && s_sensors[i].changed_at && !(t->alerted & ALERT_SILENT)) {
                     t->alerted |= ALERT_SILENT;
                     snprintf(msg, sizeof(msg), T->al_silent_fmt, s_sensors[i].name,
-                             (int)((mono_s() - t->alive_at) / 60));
+                             (int)((mono_s() - t->alive_at) / 3600));
                     telegram_notify(msg);
                 } else if (v && (t->alerted & ALERT_SILENT)) {
                     t->alerted &= ~ALERT_SILENT;
