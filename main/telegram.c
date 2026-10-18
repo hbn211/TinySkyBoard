@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_app_desc.h"
 #include "esp_wifi.h"
@@ -559,8 +560,10 @@ static void send_status(int64_t chat_id)
         }
         append(out, sizeof(out), &n, "\n");
     }
-    append(out, sizeof(out), &n, "%s: %u KB\nTinySkyBoard v%s", T->st_memory,
-           (unsigned)(esp_get_free_heap_size() / 1024), esp_app_get_description()->version);
+    // free / lowest since boot / largest block (an HTTPS connection needs a big one)
+    append(out, sizeof(out), &n, "%s: %u KB (min %u, block %u)\nTinySkyBoard v%s", T->st_memory,
+           (unsigned)(esp_get_free_heap_size() / 1024), (unsigned)(esp_get_minimum_free_heap_size() / 1024),
+           (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024), esp_app_get_description()->version);
     reply(chat_id, out);
 }
 // Cleans the text and checks it fits the screen (in any rotation) and the byte limit.

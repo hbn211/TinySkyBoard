@@ -125,7 +125,8 @@ void board_led_init(void)
         .strip_gpio_num = RGB_LED_PIN,
         .max_leds = 1,
         .led_model = LED_MODEL_WS2812,
-        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        // this board's LED takes RGB order, not the usual WS2812 GRB (with GRB red showed as green)
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_RGB,
     };
     const led_strip_rmt_config_t rmt_cfg = {
         .resolution_hz = 10 * 1000 * 1000,

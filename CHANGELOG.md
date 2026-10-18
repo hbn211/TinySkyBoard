@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes
+
+- The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual
+  WS2812 GRB): the reminder's red breathing looked green, and so did "Wi-Fi down".
+- Free memory could drop to about 1 KB when several HTTPS connections overlapped, so the weather
+  failed to load; TLS buffers are now allocated only while data moves (lowest free memory ~49 KB).
+  `/status` and the log show free / lowest / largest block.
+- Turning night mode on from its card started the clock only ~20 s later.
+
 - **Telegram alerts for the Govee sensors**: min/max temperature and humidity per sensor on the
   setup page (saved by sensor ID); one message when a reading leaves the range and one when it's
   back, with a small margin so it doesn't repeat. Optional message when a sensor stops sending.

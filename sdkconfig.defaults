@@ -18,3 +18,9 @@ CONFIG_LV_USE_QRCODE=y
 
 # color emoji in messages (main/emoji)
 CONFIG_LV_USE_IMGFONT=y
+
+# TLS buffers only while data is moving (the bot's long poll idles most of the time);
+# several HTTPS connections at once drove free memory down to ~1 KB
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y

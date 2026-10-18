@@ -1338,7 +1338,9 @@ bool ui_browse_next(void)
         night_wake(WAKE_CLICK_S);
         return true;
     }
-    s_wake_left = LV_MAX(s_wake_left, WAKE_CLICK_S);   // keep it awake while browsing
+    if (!(s_card && s_card_night)) {
+        s_wake_left = LV_MAX(s_wake_left, WAKE_CLICK_S);   // keep it awake while browsing
+    }
     refresh_items();
     // sequence: message 1 .. message n, setup card, back to the dashboard
     if (!s_browse) {
@@ -1358,6 +1360,9 @@ bool ui_browse_next(void)
         return true;
     }
     if (s_card) {
+        if (s_card_night) {
+            s_wake_left = 0;   // leaving the night-mode card: if night mode is on, go straight to the clock
+        }
         exit_browse();
         return false;
     }
@@ -1582,8 +1587,9 @@ void ui_night_toggle(void)
         s_night_effective = true;
         s_wake_left = 0;
     }
+    s_wake_left = 0;        // this was the point of the clicks: don't keep the panel awake
     render_message();       // the card shows the new state for a moment...
-    s_browse_left = 2;      // ...then back to normal, and the night clock comes up if it's on
+    s_browse_left = 1;      // ...then back to normal, and the night clock comes up right away if it's on
 }
 
 bool ui_night_active(void)

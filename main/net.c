@@ -14,6 +14,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_netif_sntp.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -493,6 +494,9 @@ static void net_task(void *arg)
         if (ok) {
             check_rain_alert(&w);
         }
+        ESP_LOGI(TAG, "heap: free %u KB, min %u KB, largest block %u KB%s", (unsigned)(esp_get_free_heap_size() / 1024),
+                 (unsigned)(esp_get_minimum_free_heap_size() / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024), ok ? "" : " (weather failed)");
         if (ok && lvgl_port_lock(0)) {
             ui_set_weather(&w);
             lvgl_port_unlock();
