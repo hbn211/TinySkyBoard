@@ -44,7 +44,9 @@ the setup page and in the bot's `/status` reply.
   Twemoji). Up to 5 messages take turns with the dashboard.
   The bot warns you when a message is too long to fit.
 - **Scheduled messages** (`/schedule`): a step-by-step assistant with quick-reply buttons —
-  time, duration and repeat (once, every day, Mon–Fri, weekends).
+  time, duration and repeat (once, every day, Mon–Fri, weekends). Optionally the reminder also
+  arrives in Telegram when it starts, with a **✅ Done** button that clears it from the screen
+  (handy for "take the medicine"); deleting it on the panel updates that button too.
 - **Uptime notices**: the bot tells you when the panel powers on (and why — e.g. a power cut,
   with how long it was off) and when the internet comes back after an outage. `/status` answers
   whether it's alive, and lists the Govee sensors.

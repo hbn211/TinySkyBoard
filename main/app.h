@@ -137,6 +137,9 @@ bool net_get_weather(weather_t *out);   // last downloaded weather
 void telegram_start(void);
 typedef enum { TG_OFF, TG_CONNECTING, TG_OK, TG_FAILING } tg_state_t;
 void telegram_notify(const char *text);   // alert to the owner, sent by the bot task (any task may call it)
+// A reminder with SCHED_F_TG_DONE started (closed = false: send it with a "Done" button), or that
+// occurrence left the screen from the panel (closed = true: the Telegram button says so)
+void telegram_reminder(uint32_t id, int64_t occ, bool closed);
 tg_state_t telegram_state(void);
 
 // govee.c — Govee thermometers (cloud OpenAPI)

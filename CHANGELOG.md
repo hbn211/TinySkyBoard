@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **✅ Done in Telegram**: `/schedule` asks whether the reminder should also arrive in Telegram when
+  it starts, with a button that clears it from the screen. Deleting it on the panel relabels the
+  button ("Done on the panel"); `/list` marks these schedules with 🔔.
 - **Work forecast** (optional): the weather in the city where you work, on chosen weekdays and
   hours, with rain chance and temperature for the next 12 hours.
 - Work and night-mode times take minutes (e.g. 12:15–13:45) with the phone's time picker.
@@ -19,6 +22,7 @@
   UV and air with a level bar) and the rain chart across the width.
 ### Fixes
 
+- After a failed air-quality fetch the last value stays on screen for at most one hour.
 - A click before the Wi-Fi connected restarted the panel (the message list wasn't loaded yet); saved
   messages now show from power-on. Clicks during network work are no longer lost.
 - The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual

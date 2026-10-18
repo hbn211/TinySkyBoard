@@ -14,6 +14,8 @@
 
 static const char *TAG = "schedule";
 
+_Static_assert(sizeof(sched_t) == 144, "sched_t is saved as a blob: its size must not change");
+
 typedef struct {
     uint32_t id;            // 0 = free slot
     int64_t when;
@@ -195,6 +197,9 @@ static void evaluate(void)
             mask |= 1u << i;
             if (occ != s_announced[i]) {
                 ESP_LOGI(TAG, "started: %s", s_sched[i].text);
+                if (s_sched[i].flags & SCHED_F_TG_DONE) {
+                    telegram_reminder(s_sched[i].id, occ, false);
+                }
                 s_announced[i] = occ;
                 s_unread_sched[i] = true;
                 s_events |= MSG_EV_NEW | MSG_EV_CHANGED;
@@ -350,6 +355,7 @@ bool msg_delete(uint32_t key)
         for (int i = 0; i < SCHED_MAX && !ok; i++) {
             time_t occ;
             if (s_sched[i].id == id && sched_is_active(&s_sched[i], now, &occ)) {
+                telegram_reminder(id, occ, true);
                 if (s_sched[i].repeat == REPEAT_ONCE) {
                     ESP_LOGI(TAG, "deleted with the button: %s", s_sched[i].text);
                     memset(&s_sched[i], 0, sizeof(s_sched[i]));
@@ -522,6 +528,7 @@ bool sched_skip_today(uint32_t id)
         time_t occ = current_or_next(&s_sched[i], now);
         if (occ) {
             ESP_LOGI(TAG, "skipped one occurrence: %s", s_sched[i].text);
+            telegram_reminder(id, occ, true);
             s_dismissed[i] = occ;
             s_unread_sched[i] = false;
             save_sched_state();
@@ -547,6 +554,10 @@ bool sched_delete_id(uint32_t id)
     for (int i = 0; i < SCHED_MAX && !ok; i++) {
         if (s_sched[i].id == id) {
             ESP_LOGI(TAG, "deleted from the panel: %s", s_sched[i].text);
+            time_t occ;
+            if (sched_is_active(&s_sched[i], time(NULL), &occ)) {
+                telegram_reminder(id, occ, true);
+            }
             memset(&s_sched[i], 0, sizeof(s_sched[i]));
             s_unread_sched[i] = false;
             save_sched();
@@ -559,6 +570,34 @@ bool sched_delete_id(uint32_t id)
     }
     xSemaphoreGive(s_lock);
     xTaskNotifyGive(s_task);
+    return ok;
+}
+
+bool sched_done(uint32_t id, time_t occ)
+{
+    bool on = false;
+    time_t now = time(NULL), cur;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (s_sched[i].id == id && slot_visible(i, now, &cur) && cur == occ) {
+            on = true;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return on && msg_delete(id | KEY_SCHED);
+}
+
+bool sched_get(uint32_t id, sched_t *out)
+{
+    bool ok = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX && !ok; i++) {
+        if (id && s_sched[i].id == id) {
+            *out = s_sched[i];
+            ok = true;
+        }
+    }
+    xSemaphoreGive(s_lock);
     return ok;
 }
 

@@ -23,8 +23,11 @@ typedef struct {
     int64_t start;          // REPEAT_ONCE: start (epoch)
     uint8_t hour, minute;   // repeats: local time of day
     uint8_t repeat;         // repeat_t
+    uint8_t flags;          // SCHED_F_* (a byte that was padding: saved schedules keep their size)
     uint16_t dur_min;
 } sched_t;
+
+#define SCHED_F_TG_DONE 0x01   // when it starts, also sent to Telegram with a "Done" button
 
 // A message that is live right now: direct (Telegram) or a schedule within its window
 typedef struct {
@@ -56,3 +59,5 @@ enum { SCHED_OFF, SCHED_ON_SCREEN, SCHED_DISMISSED, SCHED_SKIPPED };
 int sched_state(uint32_t id);            // on the screen now, deleted for this occurrence, next one skipped
 bool sched_skip_today(uint32_t id);      // skip the current (or next) occurrence; a one-time schedule is deleted
 bool sched_delete_id(uint32_t id);       // delete the whole schedule
+bool sched_done(uint32_t id, time_t occ); // "Done" in Telegram: hides that occurrence if it is still on
+bool sched_get(uint32_t id, sched_t *out);

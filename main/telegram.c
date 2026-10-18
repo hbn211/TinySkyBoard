@@ -396,7 +396,8 @@ static void send_list(int64_t chat_id)
         int st = sched_state(list[i].id);
         const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed :
                           st == SCHED_SKIPPED ? T->sch_skipped : NULL;
-        o += snprintf(out + o, sizeof(out) - o, "\n%d. %s%s%s%s\n   \xE2\x80\x9C%s\xE2\x80\x9D\n", i + 1, line,
+        o += snprintf(out + o, sizeof(out) - o, "\n%d. %s%s%s%s%s\n   \xE2\x80\x9C%s\xE2\x80\x9D\n", i + 1, line,
+                      list[i].flags & SCHED_F_TG_DONE ? " \xC2\xB7 \xF0\x9F\x94\x94" : "",   // " · 🔔"
                       tag ? "  (" : "", tag ? tag : "", tag ? ")" : "", list[i].text);
     }
     reply(chat_id, out);
@@ -606,7 +607,7 @@ static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t ou
 
 // ---------- /agendar assistant ----------
 
-typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT } wizard_step_t;
+typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT, W_TG_DONE } wizard_step_t;
 
 static wizard_step_t s_step;
 static sched_t s_draft;
@@ -627,6 +628,26 @@ static void ask_duration(int64_t chat_id)
 static void ask_repeat(int64_t chat_id)
 {
     send_kb(chat_id, T->sch_ask_repeat, T->repeat, 4, 2);
+}
+
+static void ask_tg_done(int64_t chat_id)
+{
+    const char *const btns[] = {T->btn_yes, T->btn_no};
+    send_kb(chat_id, T->sch_ask_tg_done, btns, 2, 2);
+}
+
+// yes/no in any of the panel's languages; -1 if neither
+static int parse_yes_no(const char *text)
+{
+    for (int l = 0; l < LANG_COUNT; l++) {
+        if (strcasecmp(text, i18n_get(l)->btn_yes) == 0) {
+            return 1;
+        }
+        if (strcasecmp(text, i18n_get(l)->btn_no) == 0) {
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void wizard_input(int64_t chat_id, const char *text)
@@ -692,6 +713,18 @@ static void wizard_input(int64_t chat_id, const char *text)
         if (rep != REPEAT_ONCE && s_draft.dur_min > 1440) {
             s_draft.dur_min = 1440;   // a daily repeat lasts at most one day
         }
+        s_step = W_TG_DONE;
+        ask_tg_done(chat_id);
+        break;
+    }
+
+    case W_TG_DONE: {
+        int yes = parse_yes_no(text);
+        if (yes < 0) {
+            ask_tg_done(chat_id);
+            return;
+        }
+        s_draft.flags = yes ? SCHED_F_TG_DONE : 0;
         s_step = W_IDLE;
         if (!sched_add(&s_draft)) {
             reply(chat_id, T->sch_full);
@@ -907,6 +940,163 @@ void telegram_notify(const char *text)
     }
 }
 
+// ---------- reminders with a "Done" button ----------
+
+typedef struct {
+    uint32_t id;
+    int64_t occ;
+    bool closed;
+} rem_ev_t;
+
+static QueueHandle_t s_rem_q;
+// reminders sent and still waiting for "Done": which Telegram message holds each button
+static struct {
+    uint32_t id;
+    int64_t occ;
+    int64_t msg_id;
+} s_rem[SCHED_MAX];
+
+void telegram_reminder(uint32_t id, int64_t occ, bool closed)
+{
+    if (!s_rem_q || !g_cfg.tg_owner) {
+        return;
+    }
+    const rem_ev_t ev = {.id = id, .occ = occ, .closed = closed};
+    xQueueSend(s_rem_q, &ev, 0);
+}
+
+static void post(const char *method, cJSON *body, int64_t *msg_id)
+{
+    char *json = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    char url[160];
+    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/%s", g_cfg.tg_token, method);
+    cJSON *res = net_http_json(url, json, 10000);
+    free(json);
+    if (msg_id) {
+        *msg_id = (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetObjectItem(res, "result"), "message_id"));
+    }
+    cJSON_Delete(res);
+}
+
+// a one-button inline keyboard (data NULL: a label only, the tap does nothing)
+static void add_button(cJSON *body, const char *label, const char *data)
+{
+    cJSON *rows = cJSON_AddArrayToObject(cJSON_AddObjectToObject(body, "reply_markup"), "inline_keyboard");
+    if (!label) {
+        return;   // empty keyboard: removes the button
+    }
+    cJSON *row = cJSON_CreateArray();
+    cJSON *btn = cJSON_CreateObject();
+    cJSON_AddStringToObject(btn, "text", label);
+    cJSON_AddStringToObject(btn, "callback_data", data ? data : "-");
+    cJSON_AddItemToArray(row, btn);
+    cJSON_AddItemToArray(rows, row);
+}
+
+// replaces the button under a sent reminder; label "✅ Done 14:05" (fmt with the time) or none
+static void set_button(int64_t msg_id, const char *fmt)
+{
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddNumberToObject(body, "chat_id", (double)g_cfg.tg_owner);
+    cJSON_AddNumberToObject(body, "message_id", (double)msg_id);
+    char label[64];
+    if (fmt) {
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        char hm[12];
+        clock_fmt(hm, sizeof(hm), tm.tm_hour, tm.tm_min);
+        snprintf(label, sizeof(label), fmt, hm);
+    }
+    add_button(body, fmt ? label : NULL, NULL);
+    post("editMessageReplyMarkup", body, NULL);
+}
+
+static int rem_find(uint32_t id, int64_t occ)
+{
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (s_rem[i].msg_id && s_rem[i].id == id && s_rem[i].occ == occ) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void rem_handle(const rem_ev_t *ev)
+{
+    int i = rem_find(ev->id, ev->occ);
+    if (ev->closed) {
+        if (i >= 0) {   // deleted on the panel: the button says so
+            set_button(s_rem[i].msg_id, T->rem_done_panel_fmt);
+            s_rem[i].msg_id = 0;
+        }
+        return;
+    }
+    static sched_t s;
+    if (i >= 0 || !sched_get(ev->id, &s)) {
+        return;
+    }
+    char text[SCHED_TEXT + 8], data[40];
+    snprintf(text, sizeof(text), "\xF0\x9F\x94\x94 %s", s.text);   // 🔔
+    snprintf(data, sizeof(data), "d:%" PRIu32 ":%" PRId64, ev->id, ev->occ);
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddNumberToObject(body, "chat_id", (double)g_cfg.tg_owner);
+    cJSON_AddStringToObject(body, "text", text);
+    add_button(body, T->rem_done_btn, data);
+    int64_t msg_id = 0;
+    post("sendMessage", body, &msg_id);
+    if (!msg_id) {
+        return;
+    }
+    // a free slot, or the same schedule's older occurrence (its button no longer matters)
+    int slot = 0;
+    for (int k = 0; k < SCHED_MAX; k++) {
+        if (!s_rem[k].msg_id || s_rem[k].id == ev->id) {
+            slot = k;
+            break;
+        }
+    }
+    s_rem[slot].id = ev->id;
+    s_rem[slot].occ = ev->occ;
+    s_rem[slot].msg_id = msg_id;
+}
+
+// a tap on an inline button
+static void handle_callback(const cJSON *cb)
+{
+    const char *cb_id = cJSON_GetStringValue(cJSON_GetObjectItem(cb, "id"));
+    int64_t from = (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetObjectItem(cb, "from"), "id"));
+    const char *data = cJSON_GetStringValue(cJSON_GetObjectItem(cb, "data"));
+    const cJSON *msg = cJSON_GetObjectItem(cb, "message");
+    int64_t msg_id = (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItem(msg, "message_id"));
+    if (!cb_id) {
+        return;
+    }
+    const char *answer = NULL;
+    uint32_t id;
+    int64_t occ;
+    if (from == g_cfg.tg_owner && data && sscanf(data, "d:%" SCNu32 ":%" SCNd64, &id, &occ) == 2) {
+        int i = rem_find(id, occ);
+        if (i >= 0) {
+            s_rem[i].msg_id = 0;   // before sched_done: its "deleted on the panel" event must not relabel it
+        }
+        if (sched_done(id, (time_t)occ)) {
+            ESP_LOGI(TAG, "reminder done from Telegram");
+            set_button(msg_id, T->rem_done_fmt);
+        } else {
+            answer = T->rem_gone;
+            set_button(msg_id, NULL);
+        }
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "callback_query_id", cb_id);
+    if (answer) {
+        cJSON_AddStringToObject(body, "text", answer);
+    }
+    post("answerCallbackQuery", body, NULL);
+}
+
 tg_state_t telegram_state(void)
 {
     return s_state;
@@ -928,9 +1118,15 @@ static void telegram_task(void *arg)
             ESP_LOGI(TAG, "alert: %s", note);
             reply(g_cfg.tg_owner, note);
         }
+        rem_ev_t ev;
+        while (announced && !fail_since && xQueueReceive(s_rem_q, &ev, 0) == pdTRUE) {
+            rem_handle(&ev);
+        }
         // the first poll (and the first after an outage) returns at once, so the notice goes out quickly;
         // a shorter wait while alerts are queued
-        int wait_s = (!announced || fail_since) ? 0 : uxQueueMessagesWaiting(s_notes) ? 1 : POLL_TIMEOUT_S;
+        int wait_s = (!announced || fail_since)                                     ? 0
+                     : uxQueueMessagesWaiting(s_notes) || uxQueueMessagesWaiting(s_rem_q) ? 1
+                                                                                          : POLL_TIMEOUT_S;
         snprintf(url, sizeof(url),
                  "https://api.telegram.org/bot%s/getUpdates?timeout=%d&limit=5&offset=%" PRId64,
                  g_cfg.tg_token, wait_s, offset);
@@ -970,6 +1166,10 @@ static void telegram_task(void *arg)
             if (msg) {
                 handle_message(msg);
             }
+            const cJSON *cb = cJSON_GetObjectItem(upd, "callback_query");
+            if (cb) {
+                handle_callback(cb);
+            }
         }
         cJSON_Delete(root);
     }
@@ -983,6 +1183,7 @@ void telegram_start(void)
         nvs_close(nvs);
     }
     s_notes = xQueueCreate(NOTE_QUEUE, NOTE_MAX);
-    ESP_LOGI(TAG, "bot active, owner %" PRId64, g_cfg.tg_owner);
+    s_rem_q = xQueueCreate(SCHED_MAX, sizeof(rem_ev_t));
+    ESP_LOGI(TAG, "bot active");
     xTaskCreate(telegram_task, "telegram", 10240, NULL, 3, NULL);
 }

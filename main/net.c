@@ -13,6 +13,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_netif_sntp.h"
@@ -30,6 +31,8 @@
 static const char *TAG = "net";
 static EventGroupHandle_t s_events;
 static uint32_t s_weather_color;   // 0 = no weather yet
+#define AQI_KEEP_US (60 * 60 * 1000000LL)   // a failed air-quality fetch shows the last one up to this old
+
 static weather_t s_last_weather;   // for /status
 static bool s_has_weather;
 
@@ -534,8 +537,13 @@ static void net_task(void *arg)
         xEventGroupWaitBits(s_events, CONNECTED_BIT, false, true, portMAX_DELAY);
         weather_t w;
         bool ok = fetch_weather(&w);
-        if (ok && w.aqi < 0 && s_has_weather) {
-            w.aqi = s_last_weather.aqi;   // keep the last good air quality rather than none
+        // keep the last good air quality rather than none, while it is less than an hour old
+        static int64_t aqi_at;
+        int64_t now_us = esp_timer_get_time();
+        if (ok && w.aqi >= 0) {
+            aqi_at = now_us;
+        } else if (ok && s_has_weather && now_us - aqi_at < AQI_KEEP_US) {
+            w.aqi = s_last_weather.aqi;
         }
         if (ok) {
             check_rain_alert(&w);

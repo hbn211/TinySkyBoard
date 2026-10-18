@@ -211,6 +211,12 @@ typedef struct {
     const char *sch_bad_index;
     const char *sch_no_clock;
     const char *btn_now;
+    const char *btn_yes, *btn_no;
+    const char *sch_ask_tg_done;     // /agendar: also send it to Telegram with a "Done" button?
+    const char *rem_done_btn;        // the button under a reminder
+    const char *rem_done_fmt;        // after the tap: "✅ Done 14:05"
+    const char *rem_done_panel_fmt;  // deleted on the panel instead
+    const char *rem_gone;            // the tap came after it left the screen
     const char *btn_in30;           // must start with the language's word for "in"
     const char *btn_day;            // "1 day"
     const char *repeat[4];          // once, every day, Mon-Fri, weekends
