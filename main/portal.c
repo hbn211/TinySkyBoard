@@ -147,7 +147,9 @@ static const char PAGE_HEAD[] =
     "input[type=range]{padding:0;accent-color:#4fc3f7}.rv{float:right;color:#e8ecf4}"
     "label.chk{display:flex;align-items:center;gap:10px;color:#e8ecf4}"
     "label.chk input{width:22px;height:22px;flex:none;accent-color:#4fc3f7}"
-    ".hrs{display:flex;align-items:center;gap:8px}.hrs span{color:#8a94a8}"
+    ".hrs{display:flex;align-items:center;gap:8px}.hrs span{color:#8a94a8}.hrs input{color-scheme:dark}"
+    ".days{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}.days label{display:flex;align-items:center;"
+    "gap:4px;margin:0;color:#e8ecf4}.days input{width:18px;height:18px;accent-color:#4fc3f7}"
     ".al{margin:10px 0}.al b{display:block;margin-bottom:4px;font-weight:500}"
     ".al4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.al4 input{padding:8px 6px;font-size:.9em}"
     ".rot{display:grid;grid-template-columns:1fr 1fr;gap:8px}"
@@ -157,6 +159,13 @@ static const char PAGE_HEAD[] =
     "nav{display:flex;gap:10px;align-items:center}nav a{color:#8a94a8;text-decoration:none}"
     "nav .l{text-transform:uppercase}nav a.on{color:#4fc3f7;font-weight:600}"
     ".ver{text-align:center;color:#8a94a8;font-size:.8em;margin-top:20px}"
+    "h2{font-size:.8em;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#4fc3f7;"
+    "margin:28px 0 -4px;padding-bottom:6px;border-bottom:1px solid #263049}"
+    "@media(min-width:900px){body:has(form){max-width:1040px;padding:24px}"
+    "form{columns:2;column-gap:20px}section{break-inside:avoid;display:inline-block;width:100%;"
+    "box-sizing:border-box;margin-bottom:20px;padding:4px 18px 18px;border:1px solid #263049;"
+    "border-radius:14px;background:#0f1524}h2{margin-top:14px}"
+    "form button{column-span:all;display:block;max-width:420px;margin:4px auto 0}}"
     "nav .h{margin-right:auto;border:1px solid #263049;border-radius:8px;padding:4px 10px;color:#e8ecf4}"
     "</style></head><body>";
 
@@ -425,6 +434,52 @@ static void save_compare(const char *body)
     govee_cmp_save(cmp);
 }
 
+// From/to time fields (minutes of the day); the value is always "HH:MM", the phone shows its own picker
+static void send_hours(httpd_req_t *req, const char *const names[2], const int cur[2])
+{
+    for (int k = 0; k < 2; k++) {
+        char html[80];
+        snprintf(html, sizeof(html), "%s<input type=time name=%s value=%02d:%02d>", k ? "<span>&ndash;</span>" : "",
+                 names[k], cur[k] / 60 % 24, cur[k] % 60);
+        out(req, html);
+    }
+}
+
+// "HH:MM" (or just "HH") -> minutes of the day; -1 if invalid
+static int parse_hhmm(const char *s)
+{
+    int h = 0, m = 0;
+    if (sscanf(s, "%d:%d", &h, &m) < 1 || h < 0 || h > 23 || m < 0 || m > 59) {
+        return -1;
+    }
+    return h * 60 + m;
+}
+
+// "Work" page: city, hours and days of the week
+static void send_work(httpd_req_t *req, const i18n_t *L)
+{
+    out(req, "<label>");
+    out(req, L->p_work);
+    out(req, "</label><input name=work_city maxlength=46 value=\"");
+    send_escaped(req, g_cfg.work_city);
+    out(req, "\"><label>");
+    out(req, L->p_work_hours);
+    out(req, "</label><div class=hrs>");
+    static const char *const NAMES[] = {"work_from", "work_to"};
+    const int cur[] = {g_cfg.work_from, g_cfg.work_to};
+    send_hours(req, NAMES, cur);
+    out(req, "</div><div class=days>");
+    for (int d = 0; d < 7; d++) {
+        char html[96];
+        snprintf(html, sizeof(html), "<label><input type=checkbox name=wd%d value=1%s>%s</label>", d,
+                 g_cfg.work_days & (1 << d) ? " checked" : "", L->days[d]);
+        out(req, html);
+    }
+    out(req, "</div><small>");
+    out(req, L->p_work_hint);
+    out(req, "</small>");
+}
+
 // Night mode: checkbox + from/to hours
 static void send_night(httpd_req_t *req, const i18n_t *L)
 {
@@ -435,20 +490,9 @@ static void send_night(httpd_req_t *req, const i18n_t *L)
     out(req, L->p_night_hours);
     out(req, "</label><div class=hrs>");
     static const char *const NAMES[] = {"night_from", "night_to"};
-    const int defs[] = {NIGHT_DEFAULT_FROM, NIGHT_DEFAULT_TO};
-    for (int k = 0; k < 2; k++) {
-        int cur = config_get_u8_def(NAMES[k], defs[k]);
-        char opt[64];
-        snprintf(opt, sizeof(opt), "%s<select name=%s>", k ? "<span>&ndash;</span>" : "", NAMES[k]);
-        out(req, opt);
-        for (int hr = 0; hr < 24; hr++) {
-            char hm[12];
-            clock_fmt(hm, sizeof(hm), hr, 0);
-            snprintf(opt, sizeof(opt), "<option value=%d%s>%s", hr, hr == cur ? " selected" : "", hm);
-            out(req, opt);
-        }
-        out(req, "</select>");
-    }
+    const int cur[] = {config_get_u8_def("night_from", NIGHT_DEFAULT_FROM) % 24 * 60 + config_get_u8("night_fm") % 60,
+                       config_get_u8_def("night_to", NIGHT_DEFAULT_TO) % 24 * 60 + config_get_u8("night_tm") % 60};
+    send_hours(req, NAMES, cur);
     out(req, "</div><small>");
     out(req, L->p_night_hint);
     out(req, "</small>");
@@ -537,6 +581,14 @@ static esp_err_t help_get(httpd_req_t *req)
     return out(req, NULL);
 }
 
+// Starts section n (closing the previous one): a titled group, a card in two columns on wide screens
+static void section(httpd_req_t *req, const i18n_t *L, int n)
+{
+    out(req, n ? "</section><section><h2>" : "<section><h2>");
+    out(req, L->p_sec[n]);
+    out(req, "</h2>");
+}
+
 static esp_err_t root_get(httpd_req_t *req)
 {
     uint8_t lang = page_lang(req);
@@ -544,7 +596,9 @@ static esp_err_t root_get(httpd_req_t *req)
     send_head(req, lang, false);
     out(req, "<h1>");
     out(req, L->p_title);
-    out(req, "</h1><form method=post action=/save><label>");
+    out(req, "</h1><form method=post action=/save>");
+    section(req, L, 0);
+    out(req, "<label>");
     out(req, L->p_network);
     out(req, "</label><input name=ssid list=nets required autocomplete=off value=\"");
     send_escaped(req, g_cfg.ssid);
@@ -572,8 +626,9 @@ static esp_err_t root_get(httpd_req_t *req)
     send_escaped(req, g_cfg.cities);
     out(req, "\"><small>");
     out(req, L->p_cities_hint);
-
-    out(req, "</small><label>");
+    out(req, "</small>");
+    section(req, L, 1);
+    out(req, "<label>");
     out(req, L->p_language);
     out(req, "</label><select name=lang>");
     for (uint8_t i = 0; i < LANG_COUNT; i++) {
@@ -598,6 +653,7 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</select>");
     send_night(req, L);
     send_rotation(req, L);
+    section(req, L, 2);
     send_slider(req, "bl_day", L->p_bright_day, 5, config_get_u8_def("bl_day", DIM_DEFAULT_DAY));
     send_slider(req, "bl_night", L->p_bright_night, 1, config_get_u8_def("bl_night", DIM_DEFAULT_NIGHT));
     send_slider(req, "led_lvl", L->p_bright_led, 0, config_get_u8_def("led_lvl", DIM_DEFAULT_LED));
@@ -606,18 +662,22 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "<small>");
     out(req, L->p_bright_hint);
     out(req, "</small>");
+    section(req, L, 3);
     send_seconds(req, "t_dash", L->p_t_dash);
     out(req, config_get_u8_def("wx_on", 1) ? "<label class=chk><input type=checkbox name=wx_on value=1 checked> "
                                            : "<label class=chk><input type=checkbox name=wx_on value=1> ");
     out(req, L->p_wx_on);
     out(req, "</label>");
     send_seconds(req, "t_wx", L->p_t_wx);
+    send_work(req, L);
     send_seconds(req, "t_city", L->p_t_city);
     send_seconds(req, "t_sens", L->p_t_sens);
     send_seconds(req, "t_msg", L->p_t_msg);
     out(req, "<small>");
     out(req, L->p_t_hint);
-    out(req, "</small><label>");
+    out(req, "</small>");
+    section(req, L, 4);
+    out(req, "<label>");
     out(req, L->p_tg);
     out(req, "</label><input name=tg autocomplete=off placeholder=\"");
     out(req, g_cfg.tg_token[0] ? L->p_tg_set : "123456789:ABC...");
@@ -636,7 +696,7 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</small>");
     send_alerts(req, L);
     send_compare(req, L);
-    out(req, "<button>");
+    out(req, "</section><button>");
     out(req, L->p_save);
     char footer[96];
     snprintf(footer, sizeof(footer), "</button></form><p class=ver>TinySkyBoard v%s</p></body></html>",
@@ -699,6 +759,25 @@ static esp_err_t save_post(httpd_req_t *req)
     form_value(body, "unit", unit, sizeof(unit));
     form_value(body, "tg", tg, sizeof(tg));
     form_value(body, "govee", govee, sizeof(govee));
+    char work[sizeof(g_cfg.work_city)];
+    if (form_value(body, "work_city", work, sizeof(work))) {
+        strlcpy(g_cfg.work_city, work, sizeof(g_cfg.work_city));
+    }
+    int t;
+    if (form_value(body, "work_from", num, sizeof(num)) && (t = parse_hhmm(num)) >= 0) {
+        g_cfg.work_from = t;
+    }
+    if (form_value(body, "work_to", num, sizeof(num)) && (t = parse_hhmm(num)) >= 0) {
+        g_cfg.work_to = t;
+    }
+    g_cfg.work_days = 0;
+    for (int d = 0; d < 7; d++) {
+        char key[6];
+        snprintf(key, sizeof(key), "wd%d", d);
+        if (form_value(body, key, num, sizeof(num))) {
+            g_cfg.work_days |= 1 << d;
+        }
+    }
     char cities[sizeof(g_cfg.cities)];
     if (form_value(body, "cities", cities, sizeof(cities))) {
         strlcpy(g_cfg.cities, cities, sizeof(g_cfg.cities));
@@ -761,10 +840,12 @@ static esp_err_t save_post(httpd_req_t *req)
     config_set_u8("night_on", form_value(body, "night_on", num, sizeof(num)));
     save_alerts(body);
     save_compare(body);
-    static const char *const NIGHT[] = {"night_from", "night_to"};
+    static const char *const NIGHT[][2] = {{"night_from", "night_fm"}, {"night_to", "night_tm"}};
     for (int i = 0; i < 2; i++) {
-        if (form_value(body, NIGHT[i], num, sizeof(num))) {
-            config_set_u8(NIGHT[i], atoi(num) % 24);
+        int t;
+        if (form_value(body, NIGHT[i][0], num, sizeof(num)) && (t = parse_hhmm(num)) >= 0) {
+            config_set_u8(NIGHT[i][0], t / 60);
+            config_set_u8(NIGHT[i][1], t % 60);
         }
     }
     static const char *const TIMES[] = {"t_dash", "t_wx", "t_city", "t_sens", "t_msg"};
@@ -780,7 +861,7 @@ static esp_err_t save_post(httpd_req_t *req)
             i18n_set(i);   // the "saved" page already uses the new language
         }
     }
-    ESP_LOGI(TAG, "saved: network '%s', city '%s'", g_cfg.ssid, g_cfg.city);
+    ESP_LOGI(TAG, "saved");
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     out(req, PAGE_HEAD);

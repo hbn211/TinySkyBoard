@@ -2,6 +2,7 @@
 #include "board.h"
 #include "config.h"
 #include "i18n.h"
+#include "schedule.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -49,7 +50,7 @@ void app_main(void)
     bool portal = config_take_portal_request() || !g_cfg.ssid[0];
     uint8_t rot = config_get_u8("rot") % 4;
     bool fahrenheit = config_get_u8("fahr");
-    ESP_LOGI(TAG, "%s mode, network '%s', city '%s'", portal ? "setup" : "normal", g_cfg.ssid, g_cfg.city);
+    ESP_LOGI(TAG, "%s mode", portal ? "setup" : "normal");
 
     lvgl_port_lock(0);
     board_display_set_rotation((lv_display_rotation_t)rot);
@@ -61,6 +62,7 @@ void app_main(void)
     if (portal) {
         portal_start();
     } else {
+        msg_init();   // before the button works: a click lists the messages (Wi-Fi may take a while)
         net_start();
     }
 
@@ -77,6 +79,8 @@ void app_main(void)
     };
     gpio_config(&btn);
 
+    // above the network tasks: a TLS handshake keeps the CPU busy for a while and a click would be lost
+    vTaskPrioritySet(NULL, 5);
     int held_ms = 0;
     ui_hold_t hold = UI_HOLD_NONE;   // what this press does if held (decided when it starts)
     bool done = false;               // this press already did its long action

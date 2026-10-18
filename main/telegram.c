@@ -846,14 +846,14 @@ static void handle_message(const cJSON *msg)
     if (!g_cfg.tg_owner) {
         g_cfg.tg_owner = chat_id;
         config_save();
-        ESP_LOGI(TAG, "new owner: %" PRId64, chat_id);
+        ESP_LOGI(TAG, "new owner registered");
         reply(chat_id, T->tg_welcome);
         reply(chat_id, T->tg_help);
         if (!text || text[0] == '/') {
             return;
         }
     } else if (chat_id != g_cfg.tg_owner) {
-        ESP_LOGW(TAG, "ignored message from %" PRId64, chat_id);
+        ESP_LOGW(TAG, "ignored a message from another chat");
         reply(chat_id, T->tg_private);
         return;
     }

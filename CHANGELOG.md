@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Work forecast** (optional): the weather in the city where you work, on chosen weekdays and
+  hours, with rain chance and temperature for the next 12 hours.
+- Work and night-mode times take minutes (e.g. 12:15–13:45) with the phone's time picker.
+- The serial log no longer shows the Wi-Fi name or Telegram chat ids.
 - Long city names on the dashboard roll instead of being cut.
 - **Sensor comparisons**: pick up to two pairs of Govee sensors on the setup page; each gets a page
   with the difference (A − B, colored warmer/cooler) and both readings.
@@ -15,6 +19,8 @@
   UV and air with a level bar) and the rain chart across the width.
 ### Fixes
 
+- A click before the Wi-Fi connected restarted the panel (the message list wasn't loaded yet); saved
+  messages now show from power-on. Clicks during network work are no longer lost.
 - The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual
   WS2812 GRB): the reminder's red breathing looked green, and so did "Wi-Fi down".
 - Free memory could drop to about 1 KB when several HTTPS connections overlapped, so the weather

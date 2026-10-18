@@ -32,6 +32,20 @@ typedef struct {
     int n_rain;
 } weather_t;
 
+// "Work" page (optional, setup page): weather in another city at chosen hours and days
+#define WORK_POINTS 6   // next 12 hours, every 2 hours
+typedef struct work_wx {
+    char name[48];
+    bool ok;
+    int code;
+    bool is_day;
+    float temp, tmax, tmin;
+    int n;
+    int hour[WORK_POINTS];
+    int pct[WORK_POINTS];       // chance of rain
+    float t[WORK_POINTS];       // temperature
+} work_wx_t;
+
 // Other cities (optional, setup page): local time and weather
 #define CITIES_MAX 4
 typedef struct {
@@ -51,6 +65,7 @@ void ui_init(bool config_mode);
 void ui_rebuild(void);   // rebuilds the screen for the display's current orientation
 void ui_set_weather(const weather_t *w);
 void ui_set_cities(const city_wx_t *c, int n);
+void ui_set_work(const struct work_wx *w);
 void ui_set_status(const char *text);
 void ui_set_fahrenheit(bool on);
 void ui_toast(const char *text);          // temporary message in the status bar

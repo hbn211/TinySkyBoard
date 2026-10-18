@@ -92,6 +92,8 @@ typedef struct {
     const char *aqi_level[6];       // good, fair, moderate, poor, very poor, extremely poor
     const char *city_same_time;
     const char *city_minmax_fmt;    // %.0f min, %.0f max     // other city in the same time zone
+    const char *work_title;         // "work" weather page
+    const char *work_chart;         // "Next 12 h: rain % and temperature"
     const char *cmp_title;          // sensor comparison page
     const char *cmp_hum_fmt;        // %+.0f = humidity difference
     const char *cmp_same;           // "same temperature"
@@ -103,6 +105,7 @@ typedef struct {
 
     // setup page
     const char *p_title;
+    const char *p_sec[5];           // setup page sections: place, display, brightness, rotation, integrations
     const char *p_network;
     const char *p_network_hint;
     const char *p_password;
@@ -125,6 +128,9 @@ typedef struct {
     const char *p_t_city;
     const char *p_govee;
     const char *p_govee_hint;
+    const char *p_work;
+    const char *p_work_hint;
+    const char *p_work_hours;
     const char *p_cmp;
     const char *p_cmp_hint;
     const char *p_alerts;

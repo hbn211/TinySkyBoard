@@ -30,6 +30,8 @@ the setup page and in the bot's `/status` reply.
   from the city. 24-hour or 12-hour (AM/PM) format.
 - **Weather details page**: feels-like temperature, UV index, air quality (European AQI) and the
   chance of rain for each of the next 6 hours, with the usual color scales.
+- **Work forecast** (optional): at the hours and on the weekdays you choose (e.g. 6–8 h, Monday
+  to Friday), a page with the weather in the city where you work and its next 12 hours.
 - **Other cities** (optional, up to 4): a world-clock page per city with its local time, date,
   time difference and weather.
 - **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key. An
@@ -167,6 +169,15 @@ A page right after the dashboard (on by default; turn it off on the setup page):
 - **Rain, next 6 h** — a bar per hour with the chance of rain; the most likely hour is highlighted.
 
 Everything comes from Open-Meteo (forecast and air-quality APIs, no key).
+
+### Work forecast
+
+Type the city where you work under **Work forecast** on the setup page, pick the hours (6:00–8:00
+by default) and the weekdays (Monday to Friday by default; untick your home-office days). During
+those hours a page joins the rotation right after the weather details: the weather there now
+(animated icon, temperature, low/high, sky) and the next 12 hours every 2 hours — a bar for the
+chance of rain, the temperature above it. It doesn't show under the night clock. The panel only
+fetches it from an hour before until the end of the window.
 
 ### Other cities
 

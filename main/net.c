@@ -445,12 +445,59 @@ static void check_rain_alert(const weather_t *w)
     }
 }
 
+// ---------- "work" page ----------
+
+static work_wx_t s_work;
+static double s_work_lat, s_work_lon;
+static bool s_work_geo;
+
+static void fetch_work(void)
+{
+    if (!s_work_geo) {
+        strlcpy(s_work.name, g_cfg.work_city, sizeof(s_work.name));
+        s_work_geo = geocode(g_cfg.work_city, &s_work_lat, &s_work_lon);
+        if (!s_work_geo) {
+            return;
+        }
+    }
+    char url[360];
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+             "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min"
+             "&hourly=temperature_2m,precipitation_probability&forecast_hours=%d&timezone=auto&forecast_days=1",
+             s_work_lat, s_work_lon, WORK_POINTS * 2);
+    cJSON *root = net_http_json(url, NULL, 10000);
+    const cJSON *cur = cJSON_GetObjectItem(root, "current");
+    const cJSON *daily = cJSON_GetObjectItem(root, "daily");
+    const cJSON *hourly = cJSON_GetObjectItem(root, "hourly");
+    if (cur && daily && hourly) {
+        s_work.temp = json_num(cur, "temperature_2m");
+        s_work.code = (int)json_num(cur, "weather_code");
+        s_work.is_day = json_num(cur, "is_day") != 0;
+        s_work.tmax = json_at(daily, "temperature_2m_max", 0);
+        s_work.tmin = json_at(daily, "temperature_2m_min", 0);
+        const cJSON *htime = cJSON_GetObjectItem(hourly, "time");
+        s_work.n = 0;
+        for (int i = 0; i < WORK_POINTS && i * 2 < cJSON_GetArraySize(htime); i++) {
+            const char *t = cJSON_GetStringValue(cJSON_GetArrayItem(htime, i * 2));
+            const char *hh = t ? strchr(t, 'T') : NULL;
+            s_work.hour[i] = hh ? atoi(hh + 1) : 0;
+            s_work.pct[i] = (int)json_at(hourly, "precipitation_probability", i * 2);
+            s_work.t[i] = json_at(hourly, "temperature_2m", i * 2);
+            s_work.n++;
+        }
+        s_work.ok = true;
+        ESP_LOGI(TAG, "work (%s): %.1f C, code %d", s_work.name, s_work.temp, s_work.code);
+    }
+    cJSON_Delete(root);
+}
+
 static void net_task(void *arg)
 {
     EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED_BIT, false, true,
                                            pdMS_TO_TICKS(FIRST_CONNECT_MS));
     if (!(bits & CONNECTED_BIT)) {
-        ESP_LOGW(TAG, "could not connect to '%s', opening the portal", g_cfg.ssid);
+        ESP_LOGW(TAG, "could not connect to the Wi-Fi, opening the portal");
         char msg[64];
         snprintf(msg, sizeof(msg), LV_SYMBOL_WARNING " %s", T->no_wifi_portal);
         set_status(msg);
@@ -476,7 +523,6 @@ static void net_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(60 * 1000));
     }
 
-    msg_init();
     if (g_cfg.tg_token[0]) {
         telegram_start();
     }
@@ -507,6 +553,17 @@ static void net_task(void *arg)
         }
         for (int i = 0; i < s_ncities; i++) {
             fetch_city(i);
+        }
+        // the work page: only from an hour before its time until its end
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        if (tm.tm_year >= (2024 - 1900) && work_time(&tm, 1)) {
+            fetch_work();
+            if (s_work.ok && lvgl_port_lock(0)) {
+                ui_set_work(&s_work);
+                lvgl_port_unlock();
+            }
         }
         if (s_ncities && lvgl_port_lock(0)) {
             ui_set_cities(s_cities, s_ncities);

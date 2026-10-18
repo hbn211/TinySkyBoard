@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include "nvs.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
@@ -51,6 +52,9 @@ bool config_split_city(void)
 
 void config_load(void)
 {
+    g_cfg.work_from = WORK_DEFAULT_FROM;
+    g_cfg.work_to = WORK_DEFAULT_TO;
+    g_cfg.work_days = WORK_DEFAULT_DAYS;
     strlcpy(g_cfg.ssid, CONFIG_TINYSKY_WIFI_SSID, sizeof(g_cfg.ssid));
     strlcpy(g_cfg.pass, CONFIG_TINYSKY_WIFI_PASSWORD, sizeof(g_cfg.pass));
     strlcpy(g_cfg.city, CONFIG_TINYSKY_CITY, sizeof(g_cfg.city));
@@ -81,6 +85,17 @@ void config_load(void)
     uint8_t h12 = 0;
     nvs_get_u8(nvs, "h12", &h12);
     g_cfg.h12 = h12;
+    get_str(nvs, "work_city", g_cfg.work_city, sizeof(g_cfg.work_city));
+    // hours and minutes in separate keys (older versions saved only the hours)
+    static const char *const KEYS[][2] = {{"work_from", "work_fm"}, {"work_to", "work_tm"}};
+    uint16_t *dst[] = {&g_cfg.work_from, &g_cfg.work_to};
+    for (int k = 0; k < 2; k++) {
+        uint8_t h = *dst[k] / 60, m = 0;
+        nvs_get_u8(nvs, KEYS[k][0], &h);
+        nvs_get_u8(nvs, KEYS[k][1], &m);
+        *dst[k] = (h % 24) * 60 + m % 60;
+    }
+    nvs_get_u8(nvs, "work_days", &g_cfg.work_days);
     nvs_close(nvs);
     if (config_split_city()) {
         config_save();
@@ -103,6 +118,12 @@ void config_save(void)
     nvs_set_i64(nvs, "tg_owner", g_cfg.tg_owner);
     nvs_set_str(nvs, "govee_key", g_cfg.govee_key);
     nvs_set_str(nvs, "cities", g_cfg.cities);
+    nvs_set_str(nvs, "work_city", g_cfg.work_city);
+    nvs_set_u8(nvs, "work_from", g_cfg.work_from / 60);
+    nvs_set_u8(nvs, "work_fm", g_cfg.work_from % 60);
+    nvs_set_u8(nvs, "work_to", g_cfg.work_to / 60);
+    nvs_set_u8(nvs, "work_tm", g_cfg.work_to % 60);
+    nvs_set_u8(nvs, "work_days", g_cfg.work_days);
     nvs_commit(nvs);
     nvs_close(nvs);
 }
@@ -114,6 +135,20 @@ void clock_fmt(char *out, size_t size, int hour, int min)
     } else {
         snprintf(out, size, "%02d:%02d", hour, min);
     }
+}
+
+bool work_time(const struct tm *tm, int early_h)
+{
+    if (!g_cfg.work_city[0] || !(g_cfg.work_days & (1 << tm->tm_wday))) {
+        return false;
+    }
+    int from = (g_cfg.work_from + 24 * 60 - early_h * 60) % (24 * 60);
+    return in_window(tm->tm_hour * 60 + tm->tm_min, from, g_cfg.work_to);
+}
+
+bool in_window(int min, int from, int to)
+{
+    return from <= to ? min >= from && min < to : min >= from || min < to;
 }
 
 uint8_t config_get_u8(const char *key)
