@@ -4,7 +4,7 @@ idf_component_register(SRCS "crash.c" "dimmer.c" "portal_help.c" "main.c" "board
                        EMBED_FILES "emoji/emoji.bin"
                        PRIV_REQUIRES esp_lcd esp_driver_spi esp_driver_ledc esp_driver_gpio
                                      esp_wifi esp_netif esp_event nvs_flash esp_http_client esp_http_server mbedtls
-                                     esp_app_format)
+                                     esp_app_format esp_timer)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)
 # crash.c records where a crash happened before the usual panic handling
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
