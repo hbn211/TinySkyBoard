@@ -21,7 +21,7 @@ itself: no reflashing when you move or change networks.
 > pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
 > press **RESET**. The same page updates a board later and keeps its settings.
 
-**Version 1.4.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.5.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -75,7 +75,7 @@ the setup page and in the bot's `/status` reply.
   30-minute transition.
 - **RGB LED** in the color of the current weather, blinking white until new messages are read.
 - **Adjustable rotation**: how long the clock, other cities, sensor pages and messages stay on
-  screen (5 s by default).
+  screen (5 s by default), with slide transitions and a thin bar showing the time left on each page.
 - **Status at a glance**: Wi-Fi signal bars on the dashboard, and a status list (IP, weather,
   Telegram, Govee, uptime) on the **Set up over Wi-Fi** card.
 - **Setup portal**: the board creates its own Wi-Fi with a QR code on screen, or opens the same
@@ -175,7 +175,8 @@ sensor alerts and scheduled messages; **Load a configuration file** fills a new 
 ### Screen rotation
 
 The screens take turns: **clock and weather → weather details → work forecast (in its hours) →
-other cities → Govee sensor pages → sensor comparisons → messages → clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
+other cities → Govee sensor pages → sensor comparisons → messages → clock**. Pages slide in from the right, and a thin bar at the
+bottom shrinks until the next one (at night they just swap). Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
 on the setup page (2–30 s). A new message stays 20 s the first time.
 
 ### Dashboard

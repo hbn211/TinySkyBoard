@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 — 2026-10-18
+
+- **Slide transitions**: a new page slides in from the right and the old one out to the left; the
+  same page with new content (another sensor, another message) slides in a little as it appears.
+  At night the pages just swap, so the dashboard never peeks out behind the night clock.
+- **Time-left bar**: a thin line at the bottom shrinks until the next page while the pages take
+  turns by themselves (hidden while browsing with the button and at night).
+- README: the browser flasher is explained right at the top.
+
+### Fixes
 
 - Govee: a sensor no longer leaves the screen (and no "stopped sending" alert goes out) when the API's
   "online" flag flickers off for a moment; only 3 intervals without a new reading count.
-- README: the browser flasher is explained right at the top.
 
 ## 1.4.0 — 2026-10-18
 

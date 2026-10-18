@@ -734,27 +734,147 @@ static lv_obj_t *overlay_obj(int ov)
            ov == OV_WX ? s_wx_panel : ov == OV_CMP ? s_cmp_panel : ov == OV_WORK ? s_work_panel : NULL;
 }
 
-// Shows overlay "next" (already rendered) after "prev": fades over the dashboard, cuts between pages
+#define SLIDE_MS 320
+
+static void slide_x_cb(void *o, int32_t v)
+{
+    lv_obj_set_style_translate_x(o, v, 0);
+}
+
+static void slide_opa_cb(void *o, int32_t v)
+{
+    lv_obj_set_style_opa(o, v, 0);
+}
+
+static void slide_out_done(lv_anim_t *a)
+{
+    lv_obj_add_flag(a->var, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(a->var, 0, 0);
+}
+
+static void slide(lv_obj_t *o, int from, int to, lv_anim_completed_cb_t done)
+{
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, o);
+    lv_anim_set_exec_cb(&a, slide_x_cb);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_duration(&a, SLIDE_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_completed_cb(&a, done);
+    lv_obj_set_style_translate_x(o, from, 0);
+    lv_anim_start(&a);
+}
+
+// stops a slide halfway: the object ends where the slide was going
+static void slide_stop(lv_obj_t *o)
+{
+    lv_anim_delete(o, slide_opa_cb);
+    if (lv_anim_get(o, slide_x_cb)) {
+        lv_anim_delete(o, slide_x_cb);
+        lv_obj_set_style_translate_x(o, 0, 0);
+    }
+    lv_obj_set_style_opa(o, LV_OPA_COVER, 0);
+}
+
+// Shows overlay "next" (already rendered) after "prev": the new page slides in from the right and the
+// old one out to the left (the dashboard is the page underneath); the same page with new content
+// slides in a little while it appears
 static void present(int prev, int next)
 {
     lv_obj_t *po = overlay_obj(prev), *no = overlay_obj(next);
-    if (!no) {
-        if (po) {
-            lv_obj_fade_out(po, 300, 0);
+    int w = lv_display_get_horizontal_resolution(NULL);
+    // at night the pages just swap: a slide would show the dashboard behind the night clock's turns
+    bool still = s_night_effective;
+    for (int ov = OV_MSG; ov <= OV_WORK; ov++) {
+        lv_obj_t *o = overlay_obj(ov);
+        if (o) {
+            slide_stop(o);
+            if (ov != next && (ov != prev || still)) {
+                lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+    if (still) {
+        if (no) {
+            lv_obj_remove_flag(no, LV_OBJ_FLAG_HIDDEN);
         }
         return;
     }
-    for (int ov = OV_MSG; ov <= OV_WORK; ov++) {
-        if (ov != next && overlay_obj(ov)) {
-            lv_obj_add_flag(overlay_obj(ov), LV_OBJ_FLAG_HIDDEN);
-        }
+    if (po && po != no) {
+        slide(po, 0, -w, slide_out_done);
+    }
+    if (!no) {
+        return;
     }
     lv_obj_remove_flag(no, LV_OBJ_FLAG_HIDDEN);
-    if (prev != OV_NONE) {
-        lv_obj_set_style_opa(no, LV_OPA_COVER, 0);
+    if (no == po) {
+        slide(no, w / 5, 0, NULL);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, no);
+        lv_anim_set_exec_cb(&a, slide_opa_cb);
+        lv_anim_set_values(&a, LV_OPA_20, LV_OPA_COVER);
+        lv_anim_set_duration(&a, SLIDE_MS);
+        lv_anim_start(&a);
     } else {
-        lv_obj_fade_in(no, 300, 0);
+        slide(no, w, 0, NULL);
     }
+}
+
+// ---------- time left on this page: a thin bar at the bottom that shrinks to the next page ----------
+
+static lv_obj_t *s_progress;
+static int s_progress_left = -1;   // s_left when the bar was last (re)started
+
+static void progress_w_cb(void *o, int32_t v)
+{
+    lv_obj_set_width(o, v);
+}
+
+static void build_progress(int w, int h)
+{
+    s_progress = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_progress);
+    lv_obj_set_size(s_progress, 0, 2);
+    lv_obj_set_style_bg_color(s_progress, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(s_progress, LV_OPA_60, 0);
+    lv_obj_align(s_progress, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+    s_progress_left = -1;
+}
+
+// each second: show it while the pages take turns by themselves; restart it when a page starts
+static void progress_update(bool rotating)
+{
+    if (!s_progress) {
+        return;
+    }
+    if (!rotating) {
+        if (!lv_obj_has_flag(s_progress, LV_OBJ_FLAG_HIDDEN)) {
+            lv_anim_delete(s_progress, progress_w_cb);
+            lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+        }
+        s_progress_left = -1;
+        return;
+    }
+    if (s_progress_left >= 0 && s_left < s_progress_left) {
+        s_progress_left = s_left;   // the same page, a second later: the animation is running
+        return;
+    }
+    s_progress_left = s_left;
+    int w = lv_display_get_horizontal_resolution(NULL);
+    lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_progress);
+    lv_anim_delete(s_progress, progress_w_cb);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_progress);
+    lv_anim_set_exec_cb(&a, progress_w_cb);
+    lv_anim_set_values(&a, w, 0);
+    lv_anim_set_duration(&a, s_left * 1000);
+    lv_anim_start(&a);
 }
 
 // Switches what's on screen: dashboard (idx -1) or message idx
@@ -1796,7 +1916,17 @@ static void show_pos(int p)
     }
 }
 
+static void message_cycle_step(void);
+
 static void message_cycle(void)
+{
+    message_cycle_step();
+    int total = wx_available() + work_available() + s_ncities + sens_pages() + cmp_pages() + s_n;
+    bool night = s_night || s_night_rem || s_night_msg_left > 0;
+    progress_update(total > 0 && !s_browse && !s_deleting && !s_lan && !night && s_msg_panel);
+}
+
+static void message_cycle_step(void)
 {
     if (!s_msg_panel || s_deleting) {
         return;
@@ -2434,6 +2564,7 @@ static void build(void)
     s_work_panel = NULL;
     s_night_panel = NULL;
     s_night_time = s_night_min = s_night_date = NULL;
+    s_progress = NULL;
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
 
@@ -2507,6 +2638,7 @@ static void build(void)
     build_wx_panel(w, h);
     build_cmp_panel(w, h);
     build_work_panel(w, h);
+    build_progress(w, h);
     build_night_panel(w, h);
     s_lan_panel = NULL;   // lv_layer_top was cleaned above
     s_lan_msg = NULL;
