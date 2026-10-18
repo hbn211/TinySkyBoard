@@ -11,7 +11,7 @@ Everything is configured from your phone or computer through a setup page served
 itself: no reflashing when you move or change networks. To install it, you don't need any tools:
 **[flash it from the browser](https://hbn211.github.io/TinySkyBoard/)** (Chrome or Edge).
 
-**Version 1.3.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.4.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)

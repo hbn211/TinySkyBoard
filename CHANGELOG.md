@@ -1,12 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-10-18
 
-- **Browser flasher** on GitHub Pages (ESP Web Tools): flash or update the board from Chrome/Edge,
-  keeping the settings. Releases are built by GitHub Actions with the firmware attached.
-- **Configuration backup** on the setup page: download the settings, sensor alerts and schedules
-  (without the Wi-Fi password and tokens) and load them on another board.
-- After a crash, the bot's power-on notice says where it happened (reason, task, address, version).
+- **Browser flasher** on GitHub Pages (ESP Web Tools): flash or update the board from Chrome/Edge
+  with illustrated steps, keeping the settings. Releases are built by GitHub Actions with the
+  firmware attached.
 - **More people on the bot**: `/invite` gives a link (and a code) valid for 10 minutes for someone at
   home; up to 4 people can send messages and schedules. `/members` lists and removes them. With
   more than one person, the panel and `/messages` show who sent each message; a ✅ Done reminder
@@ -15,6 +13,9 @@
 - **Scheduled messages page**: create, edit and delete scheduled messages from the browser (text,
   repeat, date and time, duration, ✅ Done in Telegram). Linked from the setup page when it's opened
   over the home network; using it keeps that page open.
+- **Configuration backup** on the setup page: download the settings, sensor alerts and schedules
+  (without the Wi-Fi password and tokens) and load them on another board.
+- After a crash, the bot's power-on notice says where it happened (reason, task, address, version).
 
 ## 1.3.0 — 2026-10-18
 
