@@ -21,6 +21,8 @@
 #include "esp_netif.h"
 #include "esp_lvgl_port.h"
 #include "lwip/sockets.h"
+#include "nvs.h"
+#include "cJSON.h"
 
 const char *portal_help_html(uint8_t lang);   // portal_help.c
 
@@ -250,6 +252,7 @@ static void send_seconds(httpd_req_t *req, const char *name, const char *label)
 }
 
 static bool form_value(const char *body, const char *key, char *out, size_t size);
+static void send_backup(httpd_req_t *req, const i18n_t *L);
 
 // Sensor alerts: one row per sensor (known now or saved before), 4 limits each; blank = no limit.
 // Temperatures in the panel's unit, saved in tenths of a degree Celsius.
@@ -721,8 +724,9 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</section><button>");
     out(req, L->p_save);
     char footer[96];
-    snprintf(footer, sizeof(footer), "</button></form><p class=ver>TinySkyBoard v%s</p></body></html>",
-             esp_app_get_description()->version);
+    out(req, "</button></form>");
+    send_backup(req, L);
+    snprintf(footer, sizeof(footer), "<p class=ver>TinySkyBoard v%s</p></body></html>", esp_app_get_description()->version);
     out(req, footer);
     return out(req, NULL);
 }
@@ -1153,6 +1157,195 @@ static esp_err_t agenda_post(httpd_req_t *req)
     return httpd_resp_send(req, NULL, 0);
 }
 
+// ---------- configuration backup: /backup downloads it, /restore loads it (e.g. on a new board) ----------
+// Every key of the "painel" namespace except the short-lived ones and the secrets (the file must be
+// safe to download while the page is open on the home network); blobs as hex.
+
+static bool backup_skip(const char *key)
+{
+    static const char *const SKIP[] = {"portal", "alive", "msgs", "unread", "sched_st", "pass", "tg_token", "govee_key"};
+    for (int i = 0; i < (int)(sizeof(SKIP) / sizeof(SKIP[0])); i++) {
+        if (strcmp(key, SKIP[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static esp_err_t backup_get(httpd_req_t *req)
+{
+    lan_touch();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"tinyskyboard-config.json\"");
+    char line[200];
+    snprintf(line, sizeof(line), "{\"tinyskyboard\":1,\"version\":\"%s\",\"nvs\":{", esp_app_get_description()->version);
+    out(req, line);
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_iterator_t it = NULL;
+        bool first = true;
+        for (esp_err_t e = nvs_entry_find(NVS_DEFAULT_PART_NAME, "painel", NVS_TYPE_ANY, &it); e == ESP_OK;
+             e = nvs_entry_next(&it)) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+            if (backup_skip(info.key)) {
+                continue;
+            }
+            snprintf(line, sizeof(line), "%s\"%s\":", first ? "" : ",", info.key);
+            if (info.type == NVS_TYPE_U8) {
+                uint8_t v = 0;
+                nvs_get_u8(nvs, info.key, &v);
+                snprintf(line + strlen(line), sizeof(line) - strlen(line), "{\"u8\":%u}", v);
+                out(req, line);
+            } else if (info.type == NVS_TYPE_I64) {
+                int64_t v = 0;
+                nvs_get_i64(nvs, info.key, &v);
+                snprintf(line + strlen(line), sizeof(line) - strlen(line), "{\"i64\":\"%" PRId64 "\"}", v);
+                out(req, line);
+            } else if (info.type == NVS_TYPE_STR) {
+                char v[160] = "";
+                size_t len = sizeof(v);
+                nvs_get_str(nvs, info.key, v, &len);
+                out(req, line);
+                out(req, "{\"str\":\"");
+                for (const char *p = v; *p; p++) {   // JSON string escaping
+                    char c[8];
+                    if (*p == '"' || *p == '\\') {
+                        snprintf(c, sizeof(c), "\\%c", *p);
+                    } else if ((unsigned char)*p < 0x20) {
+                        snprintf(c, sizeof(c), "\\u%04x", *p);
+                    } else {
+                        c[0] = *p;
+                        c[1] = '\0';
+                    }
+                    out(req, c);
+                }
+                out(req, "\"}");
+            } else if (info.type == NVS_TYPE_BLOB) {
+                size_t len = 0;
+                nvs_get_blob(nvs, info.key, NULL, &len);
+                uint8_t *v = malloc(len ? len : 1);
+                if (!v) {
+                    continue;
+                }
+                nvs_get_blob(nvs, info.key, v, &len);
+                out(req, line);
+                out(req, "{\"hex\":\"");
+                for (size_t i = 0; i < len; i++) {
+                    char h[3];
+                    snprintf(h, sizeof(h), "%02x", v[i]);
+                    out(req, h);
+                }
+                out(req, "\"}");
+                free(v);
+            } else {
+                continue;
+            }
+            first = false;
+        }
+        nvs_release_iterator(it);
+        nvs_close(nvs);
+    }
+    out(req, "}}");
+    return out(req, NULL);
+}
+
+static int hex_val(char c)
+{
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+static esp_err_t restore_post(httpd_req_t *req)
+{
+    lan_touch();
+    if (req->content_len == 0 || req->content_len > 16384) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, NULL);
+        return ESP_FAIL;
+    }
+    char *body = malloc(req->content_len + 1);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, NULL);
+        return ESP_FAIL;
+    }
+    size_t got = 0;
+    while (got < req->content_len) {
+        int r = httpd_req_recv(req, body + got, req->content_len - got);
+        if (r <= 0) {
+            free(body);
+            return ESP_FAIL;
+        }
+        got += r;
+    }
+    body[got] = '\0';
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    const cJSON *keys = cJSON_GetObjectItem(root, "nvs");
+    int n = 0;
+    nvs_handle_t nvs;
+    if (cJSON_GetObjectItem(root, "tinyskyboard") && cJSON_IsObject(keys) &&
+        nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        const cJSON *k;
+        cJSON_ArrayForEach(k, keys) {
+            const char *key = k->string;
+            const cJSON *v;
+            if (!key || strlen(key) >= NVS_KEY_NAME_MAX_SIZE || backup_skip(key)) {
+                continue;
+            }
+            if ((v = cJSON_GetObjectItem(k, "u8")) && cJSON_IsNumber(v)) {
+                n += nvs_set_u8(nvs, key, (uint8_t)v->valuedouble) == ESP_OK;
+            } else if ((v = cJSON_GetObjectItem(k, "i64")) && cJSON_IsString(v)) {
+                n += nvs_set_i64(nvs, key, strtoll(v->valuestring, NULL, 10)) == ESP_OK;
+            } else if ((v = cJSON_GetObjectItem(k, "str")) && cJSON_IsString(v)) {
+                n += nvs_set_str(nvs, key, v->valuestring) == ESP_OK;
+            } else if ((v = cJSON_GetObjectItem(k, "hex")) && cJSON_IsString(v)) {
+                size_t len = strlen(v->valuestring) / 2;
+                uint8_t *b = malloc(len ? len : 1);
+                bool ok = b != NULL;
+                for (size_t i = 0; ok && i < len; i++) {
+                    int hi = hex_val(v->valuestring[2 * i]), lo = hex_val(v->valuestring[2 * i + 1]);
+                    ok = hi >= 0 && lo >= 0;
+                    if (ok) {
+                        b[i] = hi << 4 | lo;
+                    }
+                }
+                if (ok) {
+                    n += nvs_set_blob(nvs, key, b, len) == ESP_OK;
+                }
+                free(b);
+            }
+        }
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    cJSON_Delete(root);
+    ESP_LOGI(TAG, "restored %d settings", n);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (n == 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, T->p_restore_bad);
+    }
+    config_load();   // the page shows the loaded values; Save applies them (and restarts)
+    return httpd_resp_sendstr(req, T->p_restore_ok);
+}
+
+// the setup page's backup section: download, and load a file (sent by the script as plain text)
+static void send_backup(httpd_req_t *req, const i18n_t *L)
+{
+    out(req, "<section><h2>");
+    out(req, L->p_backup);
+    out(req, "</h2><a class=ag href=/backup download>");
+    out(req, L->p_backup_get);
+    out(req, "</a><small>");
+    out(req, L->p_backup_hint);
+    out(req, "</small><label>");
+    out(req, L->p_restore);
+    out(req, "</label><input type=file accept=.json,application/json onchange=rs(this)><small id=rsm></small>"
+             "<script>function rs(i){var f=i.files[0];if(!f)return;f.text().then(function(t){"
+             "return fetch('/restore',{method:'POST',body:t})}).then(function(r){return r.text()})"
+             ".then(function(m){document.getElementById('rsm').textContent=m;alert(m);location.reload()})}"
+             "</script></section>");
+}
+
 // Any other URL (Android/iOS/Windows connectivity checks) goes to the page
 static esp_err_t redirect_get(httpd_req_t *req)
 {
@@ -1168,6 +1361,7 @@ static bool http_start(bool captive)
     cfg.stack_size = 6144;   // the save handler parses the whole form
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 12;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         s_server = NULL;
         return false;
@@ -1184,6 +1378,10 @@ static bool http_start(bool captive)
     httpd_register_uri_handler(server, &help);
     httpd_register_uri_handler(server, &preview);
     s_captive = captive;
+    const httpd_uri_t backup = {.uri = "/backup", .method = HTTP_GET, .handler = backup_get};
+    const httpd_uri_t restore = {.uri = "/restore", .method = HTTP_POST, .handler = restore_post};
+    httpd_register_uri_handler(server, &backup);
+    httpd_register_uri_handler(server, &restore);
     if (captive) {
         httpd_register_uri_handler(server, &other);
     } else {

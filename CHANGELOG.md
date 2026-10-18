@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Browser flasher** on GitHub Pages (ESP Web Tools): flash or update the board from Chrome/Edge,
+  keeping the settings. Releases are built by GitHub Actions with the firmware attached.
+- **Configuration backup** on the setup page: download the settings, sensor alerts and schedules
+  (without the Wi-Fi password and tokens) and load them on another board.
+- After a crash, the bot's power-on notice says where it happened (reason, task, address, version).
 - **More people on the bot**: `/invite` gives a link (and a code) valid for 10 minutes for someone at
   home; up to 4 people can send messages and schedules. `/members` lists and removes them. With
   more than one person, the panel and `/messages` show who sent each message; a ✅ Done reminder

@@ -1,0 +1,74 @@
+# On a version tag (v1.4.0, ...): build the firmware, attach it to a GitHub Release and publish the
+# browser flasher (flasher/ + the firmware) on GitHub Pages.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # rebuild the flasher from the current commit
+
+permissions:
+  contents: write   # create the release
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32c6
+          command: idf.py build merge-bin -o tinyskyboard-full.bin
+
+      - name: Collect the firmware
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = tag ] || VERSION="$(git rev-parse --short HEAD)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dist site
+          sudo cp build/tinyskyboard-full.bin "dist/tinyskyboard-$VERSION-esp32c6-full.bin"
+          sudo cp build/tinyskyboard.bin "dist/tinyskyboard-$VERSION-esp32c6-app.bin"
+          # the flasher writes the three parts separately, so the saved settings (NVS) survive
+          cp -r flasher/. site/
+          sudo cp build/bootloader/bootloader.bin build/partition_table/partition-table.bin build/tinyskyboard.bin site/
+          sudo chown -R "$USER" dist site
+          sed -i "s/__VERSION__/$VERSION/g" site/manifest.json site/index.html
+
+      - name: Release notes from CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: |
+          awk -v v="## $VERSION" 'index($0, v) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          **Install:** open the [browser flasher](https://hbn211.github.io/TinySkyBoard/) in Chrome or Edge,
+          or flash `*-full.bin` at offset `0x0` with esptool (this one erases the saved settings).
+          EOF
+
+      - uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          body_path: notes.md
+          files: dist/*.bin
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

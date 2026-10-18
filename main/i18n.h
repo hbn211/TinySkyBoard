@@ -108,6 +108,7 @@ typedef struct {
     const char *p_sched_link, *p_sched_title, *p_sched_new, *p_sched_text, *p_sched_dur, *p_sched_tg;
     const char *p_sched_save, *p_sched_add, *p_sched_del, *p_sched_del_q, *p_sched_saved, *p_sched_deleted;
     const char *p_sched_long;
+    const char *p_backup, *p_backup_get, *p_backup_hint, *p_restore, *p_restore_bad, *p_restore_ok;
     const char *p_sec[5];           // setup page sections: place, display, brightness, rotation, integrations
     const char *p_network;
     const char *p_network_hint;
@@ -234,6 +235,7 @@ typedef struct {
 
     // power-on/back-online notices and /status
     const char *st_boot;            // "Panel on"
+    const char *st_crash;           // label before where the last crash happened
     const char *st_reason[6];       // power, panel restart, error, brownout, USB, other
     const char *st_was_off_fmt;     // %s = since (date/time), %s = duration
     const char *st_back_fmt;        // %s = duration, %s = since (time)

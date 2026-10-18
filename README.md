@@ -2,14 +2,16 @@
 
 A desk clock, weather station and message board for the
 [Waveshare ESP32-C6-LCD-1.47](https://www.waveshare.com/esp32-c6-lcd-1.47.htm).
-It shows the time, current weather and a 5-day forecast, other cities' time and weather, readings
-from your Govee Wi-Fi thermometers, and messages you send from your phone over Telegram — right
-away or on a schedule.
+It shows the time, current weather and a 5-day forecast, weather details (UV, air quality, rain
+by the hour), other cities' time and weather, readings from your Govee Wi-Fi thermometers, and
+messages and reminders you and your family send over Telegram. At night it turns into a discreet
+clock that still wakes up for a medicine reminder.
 
-Everything is configured from your phone through a setup page served by the board itself:
-no reflashing when you move or change networks.
+Everything is configured from your phone or computer through a setup page served by the board
+itself: no reflashing when you move or change networks. To install it, you don't need any tools:
+**[flash it from the browser](https://hbn211.github.io/TinySkyBoard/)** (Chrome or Edge).
 
-**Version 1.2.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.3.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -28,10 +30,10 @@ the setup page and in the bot's `/status` reply.
 
 - **Clock and date** synced over NTP; the time zone (including daylight saving) is detected
   from the city. 24-hour or 12-hour (AM/PM) format.
-- **Weather details page**: feels-like temperature, UV index, air quality (European AQI) and the
-  chance of rain for each of the next 6 hours, with the usual color scales.
-- **Work forecast** (optional): at the hours and on the weekdays you choose (e.g. 6–8 h, Monday
-  to Friday), a page with the weather in the city where you work and its next 12 hours.
+- **Weather details page**: tiles with the feels-like temperature, UV index, air quality (European
+  AQI) and the chance of rain for each of the next 6 hours, with the usual color scales.
+- **Work forecast** (optional): at the times and on the weekdays you choose (e.g. 06:15–08:00,
+  Monday to Friday), a page with the weather in the city where you work and its next 12 hours.
 - **Other cities** (optional, up to 4): a world-clock page per city with its local time, date,
   time difference and weather.
 - **Weather now + 5-day forecast** from [Open-Meteo](https://open-meteo.com/) — no API key. An
@@ -39,21 +41,26 @@ the setup page and in the bot's `/status` reply.
   Just type the city name; coordinates are looked up automatically.
 - **Govee thermometers** (optional, e.g. H5179): temperature, humidity, today's low/high and the
   trend over the last hour, with the time of the last upload. One sensor fills the screen; two
-  share it. A sensor that stops reporting leaves the screen by itself.
+  share it. A sensor that stops reporting leaves the screen by itself. Optional **comparison
+  pages** (e.g. living room × outside) and **Telegram alerts** when a reading leaves the range you
+  set or a sensor goes silent.
 - **Telegram messages** on the screen, with **color emoji** (about 370 of the most used, from
   Twemoji). Up to 5 messages take turns with the dashboard.
-  The bot warns you when a message is too long to fit.
+  The bot warns you when a message is too long to fit. **Up to 4 more people** (family) can be
+  invited with a link; the screen then shows who sent each message.
 - **Scheduled messages** (`/schedule`): a step-by-step assistant with quick-reply buttons —
   time, duration and repeat (once, every day, Mon–Fri, weekends). Optionally the reminder also
   arrives in Telegram when it starts, with a **✅ Done** button that clears it from the screen
   (handy for "take the medicine"); deleting it on the panel updates that button too.
   They can also be created, edited and deleted on a **Scheduled messages** page, linked from the
-  setup page when it's opened over your home network.
+  setup page when it's opened over your home network, and browsed or deleted on the panel itself.
+- **Rain alert** (`/rain`): a Telegram message when rain becomes likely in the next hours.
 - **Uptime notices**: the bot tells you when the panel powers on (and why — e.g. a power cut,
-  with how long it was off) and when the internet comes back after an outage. `/status` answers
-  whether it's alive, and lists the Govee sensors.
-- **Night mode** (optional): during the hours you choose, only a discreet clock in a warm color and
-  the LED off; a new message or a click lights the panel up for a few seconds.
+  with how long it was off, or a crash with where it happened) and when the internet comes back
+  after an outage. `/status` answers whether it's alive, and lists the Govee sensors.
+- **Night mode** (optional): during the hours you choose, only a large clock in a warm color and
+  the LED off; a new message or a click lights the panel up for a few seconds, and a reminder
+  takes turns with the clock while the LED breathes red.
 - **Day/night dimmer**: screen and LED brightness follow local sunrise and sunset, with a
   30-minute transition.
 - **RGB LED** in the color of the current weather, blinking white until new messages are read.
@@ -61,9 +68,11 @@ the setup page and in the bot's `/status` reply.
   screen (5 s by default).
 - **Status at a glance**: Wi-Fi signal bars on the dashboard, and a status list (IP, weather,
   Telegram, Govee, uptime) on the **Set up over Wi-Fi** card.
-- **Setup portal**: the board creates its own Wi-Fi with a QR code on screen. Pick the network,
-  city, other cities, language, unit, time format, board orientation, brightness (with live
-  preview), screen times, Telegram and Govee from your phone.
+- **Setup portal**: the board creates its own Wi-Fi with a QR code on screen, or opens the same
+  page on your home network from the panel. Pick the network, city, other cities, language, unit,
+  time format, night mode, board orientation, brightness (with live preview), screen times, work
+  forecast, Telegram, Govee, sensor alerts and comparisons — from your phone, or in two columns on a
+  computer. A **backup file** carries the settings and schedules to another board.
 - **Three languages** — English, Portuguese and Spanish — on the screen, the setup page and
   the bot.
 
@@ -83,7 +92,26 @@ powers it.
 With the screen facing you and the USB port down, the two buttons sit on the USB edge:
 **left = control (BOOT)**, **right = reset**.
 
-## Building and flashing
+## Installing
+
+**From the browser (easiest):** open **[hbn211.github.io/TinySkyBoard](https://hbn211.github.io/TinySkyBoard/)**
+in Chrome or Edge on a computer and follow its steps: connect the board with a USB-C data cable,
+put it in flashing mode (hold **BOOT**, press and release **RESET**, release **BOOT**), click
+**Flash the board**, pick the port and **Install**, then **press RESET** when it's done. To update,
+leave "Erase device" off: the settings stay.
+
+**From a release:** each [release](https://github.com/hbn211/TinySkyBoard/releases) has
+`tinyskyboard-<version>-esp32c6-full.bin`, to write at offset `0x0` with
+[esptool](https://docs.espressif.com/projects/esptool/) (this erases the saved settings):
+
+```bash
+esptool --chip esp32c6 write-flash 0x0 tinyskyboard-1.4.0-esp32c6-full.bin
+```
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a version tag is
+pushed; the same run publishes the browser flasher (`flasher/`) on GitHub Pages.
+
+## Building from source
 
 Requires [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) **v6.0** (other 5.4+
 versions will probably work). Dependencies (LVGL, esp_lvgl_port, led_strip, cJSON) are
@@ -113,6 +141,10 @@ to restart into setup mode with its own Wi-Fi. The panel also opens the
 setup page by itself if it can't connect to Wi-Fi within 45 seconds (for example, after you
 move). Without any change, setup mode restarts after 15 minutes and tries the Wi-Fi again.
 
+At the bottom of the setup page, **Download the configuration** saves a file with the settings,
+sensor alerts and scheduled messages; **Load a configuration file** fills a new board with it
+(then type the Wi-Fi password and the tokens, which the file leaves out, and tap **Save**).
+
 ## Using it
 
 ### Control button
@@ -132,8 +164,8 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 
 ### Screen rotation
 
-The screens take turns: **clock and weather → weather details → other cities → Govee sensor
-pages → messages → clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
+The screens take turns: **clock and weather → weather details → work forecast (in its hours) →
+other cities → Govee sensor pages → sensor comparisons → messages → clock**. Pages that have nothing to show are skipped. Each screen stays 5 s by default; change it
 on the setup page (2–30 s). A new message stays 20 s the first time.
 
 ### Dashboard
@@ -153,7 +185,7 @@ at most once every 6 hours: *"🌧 70 % chance of rain at 15:00 in Munich."*
 
 ### Night mode
 
-Off by default. Turn it on on the setup page and pick the hours (00:00–06:00 by default), or
+Off by default. Turn it on on the setup page and pick the times (00:00–06:00 by default), or
 switch it on and off right away from the **Night mode** card (after the setup card). During
 them the screen shows only a large clock (it fills the screen; in portrait, hours above minutes)
 and the date in a dim amber, and the LED stays off — the unread blink too. A new message shows
@@ -176,8 +208,8 @@ Everything comes from Open-Meteo (forecast and air-quality APIs, no key).
 
 ### Work forecast
 
-Type the city where you work under **Work forecast** on the setup page, pick the hours (6:00–8:00
-by default) and the weekdays (Monday to Friday by default; untick your home-office days). During
+Type the city where you work under **Work forecast** on the setup page, pick the times (06:00–08:00
+by default, to the minute) and the weekdays (Monday to Friday by default; untick your home-office days). During
 those hours a page joins the rotation right after the weather details: the weather there now
 (animated icon, temperature, low/high, sky) and the next 12 hours every 2 hours — a bar for the
 chance of rain, the temperature above it. It doesn't show under the night clock. The panel only
@@ -284,16 +316,19 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
 - NVS is **not encrypted**: someone with physical access to the board could read the
   credentials.
 - The setup Wi-Fi **TinySkyBoard** is open while setup mode runs (at most 15 minutes).
-- When opened from the **Set up over Wi-Fi** card, the page is reachable by anyone on your home network
-  for at most 10 minutes (or until you close it). It never shows the saved Wi-Fi password, bot token or Govee key.
-- The bot only obeys its owner. To hand it over, enter `0` as the token on the setup page and
-  then the token again: the next chat to talk to it becomes the owner.
+- When opened from the **Set up over Wi-Fi** card, the page (with the scheduled messages and the
+  configuration backup) is reachable by anyone on your home network until you close it or after
+  10 minutes without use. It never shows the saved Wi-Fi password, bot token or Govee key, and the
+  backup file leaves them out.
+- The bot only obeys its owner and the people the owner invited. To hand it over, enter `0` as the
+  token on the setup page and then the token again: the next chat to talk to it becomes the owner.
 
 ## Project layout
 
 ```
 main/
   main.c          boot, control button
+  crash.c         remembers where a crash happened, for the power-on notice
   board.c/.h      LCD (ST7789 + LVGL), backlight, RGB LED, pins
   ui.c            dashboard, message screen, setup-mode screen
   net.c           Wi-Fi, NTP, Open-Meteo weather (main and other cities), geocoding, HTTPS helper
@@ -303,7 +338,7 @@ main/
   weather_icon.c  animated weather icon (Twemoji sun/moon/cloud + LVGL drops, flakes, lightning)
   dimmer.c        day/night brightness from sunrise/sunset
   led.c           RGB LED
-  portal.c        setup mode: access point, captive DNS, setup page
+  portal.c        setup page (own Wi-Fi or home network), scheduled messages page, backup
   portal_help.c   help page
   config.c/.h     settings in NVS
   i18n.c/.h       all user-facing texts (en, pt, es)
@@ -312,6 +347,8 @@ main/
 tools/
   govee_probe.py  checks the Govee API from a computer (standard library only)
   gen_emoji.py    builds main/emoji from emoji_list.txt
+flasher/          browser flasher page (ESP Web Tools), published by the release workflow
+.github/workflows release build: firmware files on the release, flasher on GitHub Pages
 partitions.csv    single 3.9 MB app partition
 sdkconfig.defaults
 ```

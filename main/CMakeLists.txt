@@ -1,4 +1,4 @@
-idf_component_register(SRCS "dimmer.c" "portal_help.c" "main.c" "board.c" "ui.c" "net.c" "led.c" "dimmer.c" "config.c" "portal.c" "portal_help.c" "telegram.c" "i18n.c" "schedule.c" "govee.c" "weather_icon.c" "emoji/emoji.c" "emoji/emoji_index.c"
+idf_component_register(SRCS "crash.c" "dimmer.c" "portal_help.c" "main.c" "board.c" "ui.c" "net.c" "led.c" "dimmer.c" "config.c" "portal.c" "portal_help.c" "telegram.c" "i18n.c" "schedule.c" "govee.c" "weather_icon.c" "crash.c" "emoji/emoji.c" "emoji/emoji_index.c"
                             "fonts/font_pt_12.c" "fonts/font_pt_14.c" "fonts/font_pt_20.c" "fonts/font_pt_28.c" "fonts/font_clock_100.c"
                        INCLUDE_DIRS "."
                        EMBED_FILES "emoji/emoji.bin"
@@ -6,3 +6,5 @@ idf_component_register(SRCS "dimmer.c" "portal_help.c" "main.c" "board.c" "ui.c"
                                      esp_wifi esp_netif esp_event nvs_flash esp_http_client esp_http_server mbedtls
                                      esp_app_format)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)
+# crash.c records where a crash happened before the usual panic handling
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")

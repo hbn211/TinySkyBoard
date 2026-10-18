@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinySkyBoard flasher</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  :root {
+    --bg: #0b0f1a; --card: #0f1524; --line: #263049; --text: #e8ecf4; --muted: #8a94a8;
+    --accent: #4fc3f7; --hold: #ffb74d; --tap: #4fc3f7; --ok: #81c784; --pcb: #1b2233; --screen: #05070c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; line-height: 1.5; }
+  main { max-width: 760px; margin: 0 auto; padding: 20px 16px 56px; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 1.7em; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  .lang { display: flex; gap: 12px; padding-top: 8px; }
+  .lang a { color: var(--muted); text-decoration: none; text-transform: uppercase; font-size: .85em; }
+  .lang a.on { color: var(--accent); font-weight: 600; }
+  .need { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 4px; }
+  .need span { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .9em; color: var(--muted); }
+  .step { display: grid; grid-template-columns: 44px 1fr; gap: 14px; background: var(--card); border: 1px solid var(--line);
+          border-radius: 16px; padding: 18px; margin-top: 16px; }
+  .num { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 700;
+         font-size: 1.3em; display: flex; align-items: center; justify-content: center; }
+  .step h2 { margin: 6px 0 4px; font-size: 1.15em; }
+  .step p { margin: 4px 0; }
+  .muted { color: var(--muted); }
+  .pics { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; margin-top: 12px; }
+  .pics > .arrow, .pics > svg + .arrow { align-self: center; }
+  .frame { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: .9em; }
+  .frame b { font-size: 1.05em; }
+  .arrow { color: var(--muted); font-size: 1.6em; }
+  svg { display: block; }
+  .tip { border-left: 3px solid var(--hold); padding: 6px 10px; margin-top: 12px; background: #1a1712; border-radius: 0 8px 8px 0; font-size: .92em; }
+  .warn { border-left-color: #ff8a80; background: #1c1214; }
+  esp-web-install-button button[slot=activate] {
+    margin-top: 12px; padding: 14px 26px; border: 0; border-radius: 12px; background: var(--accent); color: var(--bg);
+    font-size: 1.1em; font-weight: 700; cursor: pointer;
+  }
+  .mock { width: 280px; max-width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #f4f6fa; color: #222;
+          font-size: .8em; overflow: hidden; }
+  .mock .t { background: #e3e7ee; padding: 6px 10px; font-weight: 600; }
+  .mock .r { padding: 6px 10px; border-top: 1px solid #dde2ea; }
+  .mock .r.sel { background: #d7ecfb; }
+  .mock .b { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 10px; }
+  .mock .btn { padding: 3px 10px; border-radius: 6px; border: 1px solid #b8c0cc; }
+  .mock .btn.p { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  .sw { width: 34px; height: 18px; border-radius: 9px; background: #b8c0cc; position: relative; display: inline-block; }
+  .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .bar { width: 180px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 100%; background: var(--ok); animation: fill 3s ease-in-out infinite; }
+  @keyframes fill { from { width: 5%; } to { width: 100%; } }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+  @keyframes pulse { 50% { transform: scale(1.25); opacity: .55; } }
+  footer { margin-top: 28px; color: var(--muted); font-size: .9em; }
+  a { color: var(--accent); }
+  code { background: #161d2e; padding: 1px 5px; border-radius: 4px; }
+  @media (max-width: 520px) { .step { grid-template-columns: 1fr; } .num { width: 36px; height: 36px; font-size: 1.1em; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>TinySkyBoard</h1>
+      <p class="sub">v__VERSION__ · Waveshare ESP32-C6-LCD-1.47</p>
+    </div>
+    <nav class="lang"><a href="#en" data-set="en">en</a><a href="#pt" data-set="pt">pt</a><a href="#es" data-set="es">es</a></nav>
+  </header>
+
+  <div class="need">
+    <span data-t="need1"></span><span data-t="need2"></span><span data-t="need3"></span>
+  </div>
+
+  <!-- 1: cable -->
+  <section class="step">
+    <div class="num">1</div>
+    <div>
+      <h2 data-t="s1h"></h2>
+      <p data-t="s1p"></p>
+      <div class="pics">
+        <svg width="300" height="150" viewBox="0 0 300 150" aria-hidden="true">
+          <!-- laptop -->
+          <rect x="8" y="24" width="120" height="76" rx="6" fill="#161d2e" stroke="#263049" stroke-width="2"/>
+          <rect x="16" y="32" width="104" height="60" rx="3" fill="#0b0f1a"/>
+          <path d="M0 106h136l-8 10H8z" fill="#263049"/>
+          <rect x="128" y="80" width="10" height="8" rx="2" fill="#8a94a8"/>
+          <!-- cable into the board's USB (bottom) -->
+          <path d="M138 84 C180 84, 190 146, 230 146 C246 146, 248 140, 248 134" fill="none" stroke="#4fc3f7" stroke-width="4" stroke-linecap="round"/>
+          <!-- board, upright -->
+          <rect x="210" y="4" width="76" height="124" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+          <rect x="219" y="12" width="58" height="96" rx="3" fill="#0d2a3a"/>
+          <text x="248" y="64" text-anchor="middle" fill="#4fc3f7" font-size="13" font-family="system-ui">12:34</text>
+          <rect x="240" y="124" width="16" height="10" rx="3" fill="#8a94a8"/>
+        </svg>
+      </div>
+      <p class="tip" data-t="s1tip"></p>
+    </div>
+  </section>
+
+  <!-- 2: flashing mode -->
+  <section class="step">
+    <div class="num">2</div>
+    <div>
+      <h2 data-t="s2h"></h2>
+      <p data-t="s2p"></p>
+      <div class="pics">
+        <div class="frame">
+          <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+            <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+            <rect x="18" y="12" width="60" height="100" rx="3" fill="#0d2a3a"/>
+            <text x="48" y="66" text-anchor="middle" fill="#4fc3f7" font-size="13" font-family="system-ui">12:34</text>
+            <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+            <circle cx="20" cy="124" r="7" fill="#ffb74d" class="pulse"/>
+            <circle cx="76" cy="124" r="7" fill="#3a4560"/>
+            <text x="20" y="148" text-anchor="middle" fill="#ffb74d" font-size="10" font-family="system-ui" font-weight="700">BOOT</text>
+            <text x="76" y="148" text-anchor="middle" fill="#8a94a8" font-size="10" font-family="system-ui">RESET</text>
+          </svg>
+          <b style="color:var(--hold)" data-t="f1"></b>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+            <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+            <rect x="18" y="12" width="60" height="100" rx="3" fill="#0d2a3a"/>
+            <text x="48" y="66" text-anchor="middle" fill="#4fc3f7" font-size="13" font-family="system-ui">12:34</text>
+            <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+            <circle cx="20" cy="124" r="7" fill="#ffb74d"/>
+            <circle cx="76" cy="124" r="7" fill="#4fc3f7" class="pulse"/>
+            <text x="20" y="148" text-anchor="middle" fill="#ffb74d" font-size="10" font-family="system-ui" font-weight="700">BOOT</text>
+            <text x="76" y="148" text-anchor="middle" fill="#4fc3f7" font-size="10" font-family="system-ui" font-weight="700">RESET</text>
+          </svg>
+          <b style="color:var(--tap)" data-t="f2"></b>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+            <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+            <rect x="18" y="12" width="60" height="100" rx="3" fill="#05070c"/>
+            <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+            <circle cx="20" cy="124" r="7" fill="#3a4560"/>
+            <circle cx="76" cy="124" r="7" fill="#3a4560"/>
+            <text x="20" y="148" text-anchor="middle" fill="#8a94a8" font-size="10" font-family="system-ui">BOOT</text>
+            <text x="76" y="148" text-anchor="middle" fill="#8a94a8" font-size="10" font-family="system-ui">RESET</text>
+          </svg>
+          <b data-t="f3"></b>
+        </div>
+      </div>
+      <p class="tip" data-t="s2tip"></p>
+    </div>
+  </section>
+
+  <!-- 3: install -->
+  <section class="step">
+    <div class="num">3</div>
+    <div>
+      <h2 data-t="s3h"></h2>
+      <p data-t="s3p"></p>
+      <esp-web-install-button manifest="manifest.json">
+        <button slot="activate" data-t="btn"></button>
+        <p slot="unsupported" class="tip warn" data-t="unsup"></p>
+        <p slot="not-allowed" class="tip warn" data-t="https"></p>
+      </esp-web-install-button>
+      <div class="pics">
+        <div class="frame">
+          <div class="mock">
+            <div class="t" data-t="m1t"></div>
+            <div class="r sel">USB JTAG/serial debug unit (ttyACM0)</div>
+            <div class="b"><span class="btn" data-t="cancel"></span><span class="btn p" data-t="connect"></span></div>
+          </div>
+          <span data-t="m1"></span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <div class="mock">
+            <div class="t">Install TinySkyBoard?</div>
+            <div class="r"><span class="toggle"><span class="sw"></span> Erase device</span></div>
+            <div class="b"><span class="btn">Back</span><span class="btn p">Next / Install</span></div>
+          </div>
+          <span data-t="m2"></span>
+        </div>
+      </div>
+      <p class="tip" data-t="s3tip"></p>
+    </div>
+  </section>
+
+  <!-- 4: wait + reset -->
+  <section class="step">
+    <div class="num">4</div>
+    <div>
+      <h2 data-t="s4h"></h2>
+      <p data-t="s4p"></p>
+      <div class="pics">
+        <div class="frame">
+          <div class="bar"><i></i></div>
+          <span data-t="f4a"></span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+            <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+            <rect x="18" y="12" width="60" height="100" rx="3" fill="#05070c"/>
+            <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+            <circle cx="20" cy="124" r="7" fill="#3a4560"/>
+            <circle cx="76" cy="124" r="7" fill="#4fc3f7" class="pulse"/>
+            <text x="20" y="148" text-anchor="middle" fill="#8a94a8" font-size="10" font-family="system-ui">BOOT</text>
+            <text x="76" y="148" text-anchor="middle" fill="#4fc3f7" font-size="10" font-family="system-ui" font-weight="700">RESET</text>
+          </svg>
+          <b style="color:var(--tap)" data-t="f4b"></b>
+        </div>
+        <div class="arrow">→</div>
+        <div class="frame">
+          <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+            <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+            <rect x="18" y="12" width="60" height="100" rx="3" fill="#0d2a3a"/>
+            <text x="48" y="58" text-anchor="middle" fill="#fff" font-size="15" font-family="system-ui" font-weight="700">12:34</text>
+            <text x="48" y="80" text-anchor="middle" fill="#ffd54f" font-size="18" font-family="system-ui">☀</text>
+            <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+            <circle cx="20" cy="124" r="7" fill="#3a4560"/>
+            <circle cx="76" cy="124" r="7" fill="#3a4560"/>
+          </svg>
+          <b style="color:var(--ok)" data-t="f4c"></b>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5: first setup -->
+  <section class="step">
+    <div class="num">5</div>
+    <div>
+      <h2 data-t="s5h"></h2>
+      <p data-t="s5p"></p>
+      <div class="pics">
+        <svg width="96" height="150" viewBox="0 0 96 150" aria-hidden="true">
+          <rect x="8" y="4" width="80" height="128" rx="8" fill="#1b2233" stroke="#3a4560" stroke-width="2"/>
+          <rect x="18" y="12" width="60" height="100" rx="3" fill="#0b0f1a"/>
+          <text x="48" y="28" text-anchor="middle" fill="#ffb74d" font-size="8" font-family="system-ui" font-weight="700">SETUP MODE</text>
+          <rect x="30" y="36" width="36" height="36" fill="#fff"/>
+          <path d="M33 39h9v9h-9zM54 39h9v9h-9zM33 60h9v9h-9zM46 50h4v4h-4zM52 56h6v4h-6zM46 62h4v6h-4z" fill="#0b0f1a"/>
+          <text x="48" y="88" text-anchor="middle" fill="#8a94a8" font-size="7" font-family="system-ui">Wi-Fi: TinySkyBoard</text>
+          <rect x="40" y="128" width="16" height="10" rx="3" fill="#8a94a8"/>
+        </svg>
+        <div class="arrow">→</div>
+        <svg width="70" height="130" viewBox="0 0 70 130" aria-hidden="true">
+          <rect x="4" y="4" width="62" height="122" rx="10" fill="#161d2e" stroke="#3a4560" stroke-width="2"/>
+          <rect x="10" y="16" width="50" height="96" rx="3" fill="#0b0f1a"/>
+          <rect x="15" y="24" width="40" height="7" rx="2" fill="#263049"/>
+          <rect x="15" y="36" width="40" height="7" rx="2" fill="#263049"/>
+          <rect x="15" y="48" width="40" height="7" rx="2" fill="#263049"/>
+          <rect x="15" y="92" width="40" height="10" rx="3" fill="#4fc3f7"/>
+        </svg>
+      </div>
+      <p class="tip" data-t="s5tip"></p>
+    </div>
+  </section>
+
+  <section class="step">
+    <div class="num">?</div>
+    <div>
+      <h2 data-t="hh"></h2>
+      <p data-t="h1"></p>
+      <p data-t="h2"></p>
+      <p data-t="h3"></p>
+    </div>
+  </section>
+
+  <footer data-t="foot"></footer>
+</main>
+<script>
+const TXT = {
+  en: {
+    need1: "💻 A computer with Chrome or Edge", need2: "🔌 A USB-C data cable", need3: "⏱ About 3 minutes",
+    s1h: "Connect the board to the computer",
+    s1p: "Plug the USB-C cable into the board and into the computer.",
+    s1tip: "Use a <b>data</b> cable: some cables only charge, and then the computer doesn't see the board.",
+    s2h: "Put the board in flashing mode",
+    s2p: "Hold the board with the screen facing you and the USB port down. The two small buttons are next to the USB: <b>BOOT on the left</b>, <b>RESET on the right</b>.",
+    f1: "1. Press and hold BOOT", f2: "2. Press and release RESET<br>(still holding BOOT)", f3: "3. Release BOOT<br>The screen goes dark",
+    s2tip: "A dark screen is expected: the board is waiting for the new firmware.",
+    s3h: "Click the button and install",
+    s3p: "A window lists the connected devices: pick the one that says <b>USB JTAG/serial debug unit</b> and click <b>Connect</b>. Then choose <b>Install</b>.",
+    btn: "Flash the board",
+    unsup: "This browser can't talk to USB devices. Open this page in <b>Chrome</b> or <b>Edge</b> on a computer (not on a phone).",
+    https: "This page must be opened over https.",
+    m1t: "This site wants to connect to a serial port", cancel: "Cancel", connect: "Connect",
+    m1: "Pick the board's port", m2: "Leave <b>Erase device</b> off",
+    s3tip: "<b>Erase device</b>: <b>off</b> keeps your settings (Wi-Fi, city, bot) when updating. <b>On</b> erases everything — for a fresh start.",
+    s4h: "Wait, then press RESET",
+    s4p: "Installing takes about a minute. When it says <b>Installation complete</b>, close the window and <b>press RESET once</b>.",
+    f4a: "Installing… don't unplug", f4b: "Press RESET", f4c: "Ready!",
+    s5h: "First time? Set it up from your phone",
+    s5p: "A new board shows <b>SETUP MODE</b> and a QR code. Scan it (or join the <b>TinySkyBoard</b> Wi-Fi), then pick your Wi-Fi, type the password and the city, and tap <b>Save</b>.",
+    s5tip: "Updating a board that was already set up? Nothing to do: it starts with your settings.",
+    hh: "Something went wrong?",
+    h1: "<b>“Failed to initialize”</b> — do step 2 again (BOOT + RESET) and click the button again.",
+    h2: "<b>The board's port doesn't show up</b> — try another cable or USB port. On Linux, stop the ModemManager service while flashing: <code>sudo systemctl stop ModemManager</code>.",
+    h3: "<b>The screen stays dark after installing</b> — press RESET (without touching BOOT).",
+    foot: 'Instructions, help and source code: <a href="https://github.com/hbn211/TinySkyBoard">github.com/hbn211/TinySkyBoard</a>',
+  },
+  pt: {
+    need1: "💻 Um computador com Chrome ou Edge", need2: "🔌 Um cabo USB-C de dados", need3: "⏱ Uns 3 minutos",
+    s1h: "Ligue a placa no computador",
+    s1p: "Conecte o cabo USB-C na placa e no computador.",
+    s1tip: "Use um cabo <b>de dados</b>: alguns cabos só carregam, e aí o computador não enxerga a placa.",
+    s2h: "Coloque a placa no modo de gravação",
+    s2p: "Segure a placa com a tela virada para você e a porta USB para baixo. Os dois botõezinhos ficam ao lado do USB: <b>BOOT à esquerda</b>, <b>RESET à direita</b>.",
+    f1: "1. Aperte e segure BOOT", f2: "2. Aperte e solte RESET<br>(ainda segurando BOOT)", f3: "3. Solte BOOT<br>A tela apaga",
+    s2tip: "A tela apagada é normal: a placa está esperando o firmware novo.",
+    s3h: "Clique no botão e instale",
+    s3p: "Abre uma janela com os aparelhos conectados: escolha o que diz <b>USB JTAG/serial debug unit</b> e clique em <b>Conectar</b>. Depois escolha <b>Install</b>.",
+    btn: "Gravar na placa",
+    unsup: "Este navegador não acessa aparelhos USB. Abra esta página no <b>Chrome</b> ou no <b>Edge</b> num computador (não no celular).",
+    https: "Esta página precisa ser aberta por https.",
+    m1t: "Este site quer se conectar a uma porta serial", cancel: "Cancelar", connect: "Conectar",
+    m1: "Escolha a porta da placa", m2: "Deixe <b>Erase device</b> desligado",
+    s3tip: "<b>Erase device</b>: <b>desligado</b> mantém sua configuração (Wi-Fi, cidade, bot) ao atualizar. <b>Ligado</b> apaga tudo — para começar do zero.",
+    s4h: "Espere e aperte RESET",
+    s4p: "A gravação leva cerca de um minuto. Quando aparecer <b>Installation complete</b>, feche a janela e <b>aperte RESET uma vez</b>.",
+    f4a: "Gravando… não desconecte", f4b: "Aperte RESET", f4c: "Pronto!",
+    s5h: "Primeira vez? Configure pelo celular",
+    s5p: "Uma placa nova mostra <b>SETUP MODE</b> e um QR code. Leia o QR (ou conecte na rede <b>TinySkyBoard</b>), escolha o seu Wi-Fi, digite a senha e a cidade e toque em <b>Salvar</b>.",
+    s5tip: "Atualizando uma placa já configurada? Não precisa fazer nada: ela volta com a sua configuração.",
+    hh: "Deu algum problema?",
+    h1: "<b>“Failed to initialize”</b> — repita o passo 2 (BOOT + RESET) e clique no botão de novo.",
+    h2: "<b>A porta da placa não aparece</b> — tente outro cabo ou outra porta USB. No Linux, pare o serviço ModemManager durante a gravação: <code>sudo systemctl stop ModemManager</code>.",
+    h3: "<b>A tela continua apagada depois de gravar</b> — aperte RESET (sem tocar no BOOT).",
+    foot: 'Instruções, ajuda e código: <a href="https://github.com/hbn211/TinySkyBoard">github.com/hbn211/TinySkyBoard</a>',
+  },
+  es: {
+    need1: "💻 Una computadora con Chrome o Edge", need2: "🔌 Un cable USB-C de datos", need3: "⏱ Unos 3 minutos",
+    s1h: "Conecta la placa a la computadora",
+    s1p: "Conecta el cable USB-C a la placa y a la computadora.",
+    s1tip: "Usa un cable <b>de datos</b>: algunos cables solo cargan, y entonces la computadora no ve la placa.",
+    s2h: "Pon la placa en modo de grabación",
+    s2p: "Sostén la placa con la pantalla hacia ti y el puerto USB abajo. Los dos botoncitos están junto al USB: <b>BOOT a la izquierda</b>, <b>RESET a la derecha</b>.",
+    f1: "1. Mantén pulsado BOOT", f2: "2. Pulsa y suelta RESET<br>(sin soltar BOOT)", f3: "3. Suelta BOOT<br>La pantalla se apaga",
+    s2tip: "La pantalla apagada es normal: la placa espera el firmware nuevo.",
+    s3h: "Haz clic en el botón e instala",
+    s3p: "Se abre una ventana con los dispositivos conectados: elige el que dice <b>USB JTAG/serial debug unit</b> y haz clic en <b>Conectar</b>. Luego elige <b>Install</b>.",
+    btn: "Grabar en la placa",
+    unsup: "Este navegador no accede a dispositivos USB. Abre esta página en <b>Chrome</b> o <b>Edge</b> en una computadora (no en el celular).",
+    https: "Esta página debe abrirse por https.",
+    m1t: "Este sitio quiere conectarse a un puerto serie", cancel: "Cancelar", connect: "Conectar",
+    m1: "Elige el puerto de la placa", m2: "Deja <b>Erase device</b> desactivado",
+    s3tip: "<b>Erase device</b>: <b>desactivado</b> conserva tu configuración (Wi-Fi, ciudad, bot) al actualizar. <b>Activado</b> borra todo — para empezar de cero.",
+    s4h: "Espera y pulsa RESET",
+    s4p: "La grabación tarda un minuto. Cuando diga <b>Installation complete</b>, cierra la ventana y <b>pulsa RESET una vez</b>.",
+    f4a: "Grabando… no desconectes", f4b: "Pulsa RESET", f4c: "¡Listo!",
+    s5h: "¿Primera vez? Configúrala desde el celular",
+    s5p: "Una placa nueva muestra <b>SETUP MODE</b> y un código QR. Escanéalo (o conéctate a la red <b>TinySkyBoard</b>), elige tu Wi-Fi, escribe la contraseña y la ciudad y toca <b>Guardar</b>.",
+    s5tip: "¿Actualizas una placa ya configurada? No hay que hacer nada: arranca con tu configuración.",
+    hh: "¿Algo salió mal?",
+    h1: "<b>“Failed to initialize”</b> — repite el paso 2 (BOOT + RESET) y vuelve a hacer clic en el botón.",
+    h2: "<b>No aparece el puerto de la placa</b> — prueba otro cable u otro puerto USB. En Linux, detén el servicio ModemManager mientras grabas: <code>sudo systemctl stop ModemManager</code>.",
+    h3: "<b>La pantalla sigue apagada después de grabar</b> — pulsa RESET (sin tocar BOOT).",
+    foot: 'Instrucciones, ayuda y código: <a href="https://github.com/hbn211/TinySkyBoard">github.com/hbn211/TinySkyBoard</a>',
+  },
+};
+function setLang(l) {
+  if (!TXT[l]) l = "en";
+  document.documentElement.lang = l;
+  document.querySelectorAll("[data-t]").forEach(e => { e.innerHTML = TXT[l][e.dataset.t] || ""; });
+  document.querySelectorAll("[data-set]").forEach(a => a.classList.toggle("on", a.dataset.set === l));
+}
+setLang(location.hash.slice(1) || (navigator.language || "en").slice(0, 2));
+addEventListener("hashchange", () => setLang(location.hash.slice(1)));
+</script>
+</body>
+</html>

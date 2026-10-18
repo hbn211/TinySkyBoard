@@ -1,0 +1,15 @@
+{
+  "name": "TinySkyBoard",
+  "version": "__VERSION__",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C6",
+      "parts": [
+        { "path": "bootloader.bin", "offset": 0 },
+        { "path": "partition-table.bin", "offset": 32768 },
+        { "path": "tinyskyboard.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}

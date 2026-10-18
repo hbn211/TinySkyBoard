@@ -496,7 +496,7 @@ static void announce_boot(void)
     case ESP_RST_USB: r = 4; break;
     default: r = 5; break;
     }
-    char out[200];
+    char out[400];
     int n = snprintf(out, sizeof(out), "\xE2\x9C\x85 %s (%s).", T->st_boot, T->st_reason[r]);
 
     // how long it was off: from the last "still alive" mark until now (~5 min precision)
@@ -507,6 +507,11 @@ static void announce_boot(void)
         fmt_span(now - s_prev_alive - uptime_s(), span, sizeof(span));
         out[n++] = '\n';
         snprintf(out + n, sizeof(out) - n, T->st_was_off_fmt, since, span);
+    }
+    char crash[160];
+    if (crash_take(crash, sizeof(crash))) {   // where it crashed, to report it
+        n = strlen(out);
+        snprintf(out + n, sizeof(out) - n, "\n%s: %s", T->st_crash, crash);
     }
     ESP_LOGI(TAG, "boot notice: %s", out);
     reply(g_cfg.tg_owner, out);
