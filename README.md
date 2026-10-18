@@ -8,8 +8,18 @@ messages and reminders you and your family send over Telegram. At night it turns
 clock that still wakes up for a medicine reminder.
 
 Everything is configured from your phone or computer through a setup page served by the board
-itself: no reflashing when you move or change networks. To install it, you don't need any tools:
-**[flash it from the browser](https://hbn211.github.io/TinySkyBoard/)** (Chrome or Edge).
+itself: no reflashing when you move or change networks.
+
+> ### ⚡ Install it in 3 minutes — no programming, nothing to install
+>
+> You don't need to compile anything. Open the **TinySkyBoard flasher** in Chrome or Edge on a computer:
+>
+> ## 👉 [hbn211.github.io/TinySkyBoard](https://hbn211.github.io/TinySkyBoard/)
+>
+> It's a web page (hosted for free by GitHub) that talks to the board over the USB cable — modern
+> browsers can do that — and writes the latest TinySkyBoard into it. The page shows each step with
+> pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
+> press **RESET**. The same page updates a board later and keeps its settings.
 
 **Version 1.4.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
@@ -94,7 +104,7 @@ With the screen facing you and the USB port down, the two buttons sit on the USB
 
 ## Installing
 
-**From the browser (easiest):** open **[hbn211.github.io/TinySkyBoard](https://hbn211.github.io/TinySkyBoard/)**
+**From the browser (easiest, no tools):** open **[hbn211.github.io/TinySkyBoard](https://hbn211.github.io/TinySkyBoard/)**
 in Chrome or Edge on a computer and follow its steps: connect the board with a USB-C data cable,
 put it in flashing mode (hold **BOOT**, press and release **RESET**, release **BOOT**), click
 **Flash the board**, pick the port and **Install**, then **press RESET** when it's done. To update,

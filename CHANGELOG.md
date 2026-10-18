@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Govee: a sensor no longer leaves the screen (and no "stopped sending" alert goes out) when the API's
+  "online" flag flickers off for a moment; only 3 intervals without a new reading count.
+- README: the browser flasher is explained right at the top.
+
 ## 1.4.0 — 2026-10-18
 
 - **Browser flasher** on GitHub Pages (ESP Web Tools): flash or update the board from Chrome/Edge

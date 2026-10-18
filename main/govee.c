@@ -378,9 +378,11 @@ static void poll_sensor(int i)
 
 static bool visible(int i, int64_t mono)
 {
-    // only after a change was seen: until then the value's age is unknown (could be hours, if the sensor died)
+    // only after a change was seen: until then the value's age is unknown (could be hours, if the sensor died).
+    // The API's "online" flag isn't used: it flickers off for a moment while the sensor keeps uploading
+    // (each flicker meant a "stopped sending" alert), and it stays on after the battery dies.
     const govee_track_t *t = &s_track[i];
-    return t->has_value && s_sensors[i].changed_at && t->online &&
+    return t->has_value && s_sensors[i].changed_at &&
            mono - t->alive_at <= (int64_t)GOVEE_STALE_UPLOADS * s_interval_s;
 }
 
