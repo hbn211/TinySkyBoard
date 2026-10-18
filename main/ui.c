@@ -100,7 +100,12 @@ static bool s_night;             // night clock on screen
 static bool s_night_on;          // setup page option
 static int s_night_from = NIGHT_DEFAULT_FROM, s_night_to = NIGHT_DEFAULT_TO;
 static int s_wake_left;          // seconds the panel stays awake at night (message, click)
-#define WAKE_MSG_S     (MSG_NEW_S + 5)
+static int s_night_msg_left;     // a new message at night: shown alone for a while, then back to the clock
+static bool s_night_rem;         // a reminder at night: only the night clock and the reminder take turns
+static bool s_rem_clock = true;  // ...which of the two is on screen
+static int s_rem_left;
+#define REM_CLOCK_S    5
+#define REM_MSG_S      8
 #define WAKE_CLICK_S   20
 #define COLOR_NIGHT    lv_color_hex(0xc8823c)   // warm, dim amber
 static lv_obj_t *s_wx_panel;     // weather details, right after the dashboard
@@ -1273,6 +1278,9 @@ static void message_cycle(void)
         }
         return;
     }
+    if (s_night_rem || s_night_msg_left > 0) {
+        return;   // night: only the new message, or the clock and the reminder taking turns (night_tick)
+    }
     int total = wx_available() + s_ncities + sens_pages() + s_n;
     if (total == 0) {
         if (overlay_now() != OV_NONE) {
@@ -1305,8 +1313,17 @@ static void poll_cb(lv_timer_t *t)
         return;
     }
     refresh_items();
+    if ((ev & MSG_EV_NEW) && s_n > 0 && s_night_effective && s_wake_left == 0 && !s_browse && !s_deleting && !s_lan) {
+        // night: the new message alone for a while (no weather pages), then the clock again
+        s_night_msg_left = MSG_NEW_S;
+        if (s_night && s_night_panel) {
+            s_night = false;
+            lv_obj_add_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
+        }
+        show(0);
+        return;
+    }
     if ((ev & MSG_EV_NEW) && s_n > 0) {
-        night_wake(WAKE_MSG_S);
         if (!s_browse && !s_deleting) {
             s_left = MSG_NEW_S;
             show(0);
@@ -1544,10 +1561,37 @@ static void night_tick(const struct tm *tm, bool clock_ok)
     }
     bool reminder = night && sched_unread();
     led_set_urgent(reminder);   // a reminder at night: red breathing instead of the white blink
-    bool want = night && s_wake_left == 0 && !s_lan && !s_browse && !s_deleting && !reminder;
+    bool awake = s_wake_left > 0 || s_lan || s_browse || s_deleting;
+    if (s_night_msg_left > 0 && (!night || awake)) {
+        s_night_msg_left = 0;
+    }
+    bool showing_new = s_night_msg_left > 0;
+    if (showing_new) {
+        s_night_msg_left--;
+    }
+    // reminder at night: the night clock and the reminder take turns, nothing else (a click shows the rest)
+    s_night_rem = reminder && !awake && !showing_new;
+    if (s_night_rem) {
+        if (--s_rem_left <= 0) {
+            s_rem_clock = !s_rem_clock;
+            s_rem_left = s_rem_clock ? REM_CLOCK_S : REM_MSG_S;
+            if (!s_rem_clock) {
+                for (int i = 0; i < s_n; i++) {
+                    if (s_items[i].scheduled && s_items[i].unread) {
+                        show(i);
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        s_rem_clock = true;   // the turns start with the clock
+        s_rem_left = REM_CLOCK_S;
+    }
+    bool want = night && !awake && !showing_new && (!reminder || s_rem_clock);
+    led_set_quiet(night && !reminder && !awake);   // the red breathing goes on under the clock too
     if (want != s_night && s_night_panel) {
         s_night = want;
-        led_set_quiet(want);
         if (want) {
             lv_obj_remove_flag(s_night_panel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_fade_in(s_night_panel, 600, 0);

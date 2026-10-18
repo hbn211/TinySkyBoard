@@ -52,3 +52,5 @@ int sched_list(sched_t *out);            // copies the schedules in order; retur
 bool sched_add(const sched_t *s);        // false if full
 bool sched_remove(int index);            // list index (0 = first)
 bool sched_is_active(const sched_t *s, time_t now, time_t *occ);
+enum { SCHED_OFF, SCHED_ON_SCREEN, SCHED_DISMISSED };
+int sched_state(uint32_t id);            // within its time: on the screen, or deleted for this occurrence

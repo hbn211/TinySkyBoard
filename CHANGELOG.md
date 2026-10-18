@@ -10,6 +10,10 @@
   failed to load; TLS buffers are now allocated only while data moves (lowest free memory ~49 KB).
   `/status` and the log show free / lowest / largest block.
 - Turning night mode on from its card started the clock only ~20 s later.
+- `/list` said a schedule was "on the panel now" after today's occurrence had been deleted with the
+  button; it now says "deleted from the screen today".
+- At night a new message shows alone and a reminder takes turns only with the night clock (no weather
+  pages unless you click).
 
 - **Telegram alerts for the Govee sensors**: min/max temperature and humidity per sensor on the
   setup page (saved by sensor ID); one message when a reading leaves the range and one when it's

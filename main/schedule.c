@@ -460,6 +460,20 @@ int sched_list(sched_t *out)
     return n;
 }
 
+int sched_state(uint32_t id)
+{
+    int st = SCHED_OFF;
+    time_t now = time(NULL), occ;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (s_sched[i].id == id && clock_ok(now) && sched_is_active(&s_sched[i], now, &occ)) {
+            st = occ == s_dismissed[i] ? SCHED_DISMISSED : SCHED_ON_SCREEN;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return st;
+}
+
 bool sched_add(const sched_t *s)
 {
     bool ok = false;

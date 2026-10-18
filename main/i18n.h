@@ -180,6 +180,7 @@ typedef struct {
     const char *sch_empty;
     const char *sch_list_title;
     const char *sch_on_now;
+    const char *sch_dismissed;      // within its time but deleted from the screen today
     const char *sch_removed_fmt;    // %d
     const char *sch_bad_index;
     const char *sch_no_clock;

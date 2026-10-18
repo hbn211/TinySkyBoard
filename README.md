@@ -147,10 +147,11 @@ at most once every 6 hours: *"🌧 70 % chance of rain at 15:00 in Munich."*
 Off by default. Turn it on on the setup page and pick the hours (00:00–06:00 by default), or
 switch it on and off right away from the **Night mode** card (after the setup card). During
 them the screen shows only a large clock (it fills the screen; in portrait, hours above minutes)
-and the date in a dim amber, and the LED stays off — the unread blink too. A message sent over
-Telegram wakes the panel for about 25 seconds; a click wakes it for 20 seconds (the first click
-only wakes it). A **scheduled** message that starts at night — say, a medicine reminder — keeps the
-panel awake and the LED **breathing red** until you open it, delete it or its time is over.
+and the date in a dim amber, and the LED stays off — the unread blink too. A new message shows
+alone for 20 seconds (no weather pages), then the clock comes back; a click wakes the whole panel
+for 20 seconds (the first click only wakes it). A **scheduled** message that starts at night — say, a medicine reminder — takes turns with
+the night clock (clock 5 s, reminder 8 s; nothing else unless you click) and the LED **breathes
+red** until you open it, delete it or its time is over.
 
 ### Weather details
 

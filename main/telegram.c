@@ -389,13 +389,14 @@ static void send_list(int64_t chat_id)
     }
     char out[SCHED_MAX * (SCHED_TEXT + 80) + 32];
     size_t o = snprintf(out, sizeof(out), "%s\n", T->sch_list_title);
-    time_t now = time(NULL), occ;
     for (int i = 0; i < n && o < sizeof(out); i++) {
         char line[80];
         fmt_entry(&list[i], line, sizeof(line));
-        bool on = sched_is_active(&list[i], now, &occ);
+        // same rule as the screen: an occurrence deleted with the button isn't "on the panel"
+        int st = sched_state(list[i].id);
+        const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed : NULL;
         o += snprintf(out + o, sizeof(out) - o, "\n%d. %s%s%s%s\n   \xE2\x80\x9C%s\xE2\x80\x9D\n", i + 1, line,
-                      on ? "  (" : "", on ? T->sch_on_now : "", on ? ")" : "", list[i].text);
+                      tag ? "  (" : "", tag ? tag : "", tag ? ")" : "", list[i].text);
     }
     reply(chat_id, out);
 }
