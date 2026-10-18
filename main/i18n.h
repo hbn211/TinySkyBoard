@@ -52,6 +52,20 @@ typedef struct {
     const char *info_gv_err_fmt;    // %d = HTTP status (-1 = no answer)
     const char *info_gv_ok_fmt;     // %d on screen, %d sensors
     const char *info_up_fmt;        // %s = uptime
+    // schedules on the panel (card after the night-mode card)
+    const char *sv_card_title;
+    const char *sv_count_one;
+    const char *sv_count_fmt;       // %d schedules
+    const char *sv_card_empty;
+    const char *sv_card_hint;
+    const char *sv_title_fmt;       // %d of %d
+    const char *sv_hint;
+    const char *sv_z_none;          // release now: nothing / delete today / delete all
+    const char *sv_z_today;
+    const char *sv_z_all;
+    const char *sv_done_today;
+    const char *sv_done_all;
+    const char *sch_skipped;        // next occurrence skipped in advance (/list, the panel)
     const char *lan_step;
     const char *lan_close;
     const char *lan_failed;
@@ -69,6 +83,7 @@ typedef struct {
     const char *city_not_found_fmt; // %s = city
     const char *wx_title;           // weather details page
     const char *wx_feels;
+    const char *wx_real;            // "actual" (temperature) under feels-like
     const char *wx_uv;
     const char *wx_air;
     const char *wx_rain;            // "Rain, next 6 h"
@@ -77,6 +92,9 @@ typedef struct {
     const char *aqi_level[6];       // good, fair, moderate, poor, very poor, extremely poor
     const char *city_same_time;
     const char *city_minmax_fmt;    // %.0f min, %.0f max     // other city in the same time zone
+    const char *cmp_title;          // sensor comparison page
+    const char *cmp_hum_fmt;        // %+.0f = humidity difference
+    const char *cmp_same;           // "same temperature"
     const char *sens_title;         // Govee sensors screen
     const char *sens_updated_fmt;   // %s = time of the last new reading
     const char *sens_wait;
@@ -107,6 +125,8 @@ typedef struct {
     const char *p_t_city;
     const char *p_govee;
     const char *p_govee_hint;
+    const char *p_cmp;
+    const char *p_cmp_hint;
     const char *p_alerts;
     const char *p_alerts_hint;
     const char *p_alerts_none;

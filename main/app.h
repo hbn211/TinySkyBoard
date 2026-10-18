@@ -57,7 +57,8 @@ void ui_toast(const char *text);          // temporary message in the status bar
 void ui_config_message(const char *text);  // footer of the setup-mode screen
 // messages: the cycle and new ones come from schedule.c; the button browses them
 bool ui_browse_next(void);        // click: next message, then the setup card (false = back to the dashboard)
-typedef enum { UI_HOLD_NONE, UI_HOLD_DELETE, UI_HOLD_LAN_SETUP, UI_HOLD_NIGHT } ui_hold_t;
+typedef enum { UI_HOLD_NONE, UI_HOLD_DELETE, UI_HOLD_LAN_SETUP, UI_HOLD_NIGHT, UI_HOLD_SCHED_OPEN,
+               UI_HOLD_ZONES } ui_hold_t;   // ZONES: the action depends on when the button is released
 ui_hold_t ui_hold_action(void);   // what holding the button does on the current screen
 void ui_hold_progress(int percent);   // bar while holding (red = delete, blue = open setup); -1 hides it
 void ui_delete_selected(void);
@@ -65,7 +66,10 @@ void ui_lan_setup_show(const char *url);   // QR code to the setup page on the h
 void ui_lan_setup_close(void);
 bool ui_lan_setup_active(void);
 bool ui_night_active(void);
-void ui_night_toggle(void);   // hold on the night-mode card: on now / off for the rest of tonight   // night clock on screen (a click only wakes the panel)
+void ui_night_toggle(void);
+void ui_sched_open(void);              // hold on the schedule card: browse the schedules
+void ui_zone_progress(int held_ms);    // holding on a schedule: nothing / delete today / delete all / nothing
+void ui_zone_release(int held_ms);   // hold on the night-mode card: on now / off for the rest of tonight   // night clock on screen (a click only wakes the panel)
 bool ui_text_fits(const char *text, int *max_chars);   // fits the screen in any rotation?
 uint32_t ui_weather_color(int code);   // RGB color 0xRRGGBB for the WMO code
 const char *ui_weather_text(int code);  // description in the active language
@@ -130,6 +134,7 @@ tg_state_t telegram_state(void);
 #define GOVEE_STALE_UPLOADS  3    // no change in this many intervals = gone from the screen
 typedef struct {
     char name[32];
+    char device[24];        // Govee device ID
     float temp_c;
     float humidity;         // -1 = the sensor has none
     time_t changed_at;      // when a new reading was seen; 0 = none since power-on yet (not shown)
@@ -166,6 +171,14 @@ typedef struct {
     char name[32];
 } govee_ident_t;
 int govee_known(govee_ident_t *out, int max);          // sensors on the account right now (empty if not running)
+
+// Sensor comparisons (setup page): page "A x B" with the difference. NVS "cmp".
+#define GOVEE_CMP_MAX 2
+typedef struct {
+    char a[24], b[24];      // device IDs; empty = unused
+} govee_cmp_t;
+int govee_cmp_load(govee_cmp_t *out);                  // returns how many are set
+void govee_cmp_save(const govee_cmp_t *in);            // GOVEE_CMP_MAX entries
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);

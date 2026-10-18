@@ -466,12 +466,100 @@ int sched_state(uint32_t id)
     time_t now = time(NULL), occ;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < SCHED_MAX; i++) {
-        if (s_sched[i].id == id && clock_ok(now) && sched_is_active(&s_sched[i], now, &occ)) {
+        if (s_sched[i].id != id || !clock_ok(now)) {
+            continue;
+        }
+        if (sched_is_active(&s_sched[i], now, &occ)) {
             st = occ == s_dismissed[i] ? SCHED_DISMISSED : SCHED_ON_SCREEN;
+        } else if (s_dismissed[i] > now) {
+            st = SCHED_SKIPPED;   // the next occurrence was skipped beforehand
         }
     }
     xSemaphoreGive(s_lock);
     return st;
+}
+
+// Start of the occurrence that is on now, or else the next one (repeating schedules); 0 if none in a week
+static time_t current_or_next(const sched_t *s, time_t now)
+{
+    time_t occ;
+    if (sched_is_active(s, now, &occ)) {
+        return occ;
+    }
+    for (int d = 0; d <= 7; d++) {
+        struct tm t;
+        localtime_r(&now, &t);
+        t.tm_mday += d;
+        t.tm_hour = s->hour;
+        t.tm_min = s->minute;
+        t.tm_sec = 0;
+        t.tm_isdst = -1;
+        time_t o = mktime(&t);
+        bool weekend = t.tm_wday == 0 || t.tm_wday == 6;
+        if ((s->repeat == REPEAT_WEEKDAYS && weekend) || (s->repeat == REPEAT_WEEKENDS && !weekend)) {
+            continue;
+        }
+        if (o > now) {
+            return o;
+        }
+    }
+    return 0;
+}
+
+bool sched_skip_today(uint32_t id)
+{
+    bool ok = false, once = false;
+    time_t now = time(NULL);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX && !ok; i++) {
+        if (s_sched[i].id != id) {
+            continue;
+        }
+        if (s_sched[i].repeat == REPEAT_ONCE) {
+            once = true;   // only one occurrence: same as deleting it
+            break;
+        }
+        time_t occ = current_or_next(&s_sched[i], now);
+        if (occ) {
+            ESP_LOGI(TAG, "skipped one occurrence: %s", s_sched[i].text);
+            s_dismissed[i] = occ;
+            s_unread_sched[i] = false;
+            save_sched_state();
+            s_events |= MSG_EV_CHANGED;
+            ok = true;
+        }
+    }
+    if (ok) {
+        update_led();
+    }
+    xSemaphoreGive(s_lock);
+    if (once) {
+        return sched_delete_id(id);
+    }
+    xTaskNotifyGive(s_task);
+    return ok;
+}
+
+bool sched_delete_id(uint32_t id)
+{
+    bool ok = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX && !ok; i++) {
+        if (s_sched[i].id == id) {
+            ESP_LOGI(TAG, "deleted from the panel: %s", s_sched[i].text);
+            memset(&s_sched[i], 0, sizeof(s_sched[i]));
+            s_unread_sched[i] = false;
+            save_sched();
+            ok = true;
+        }
+    }
+    if (ok) {
+        update_led();
+        s_events |= MSG_EV_CHANGED;
+    }
+    xSemaphoreGive(s_lock);
+    xTaskNotifyGive(s_task);
+    return ok;
 }
 
 bool sched_add(const sched_t *s)

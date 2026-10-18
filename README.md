@@ -119,6 +119,9 @@ move). Without any change, setup mode restarts after 15 minutes and tries the Wi
 | Hold 2 s on the **Set up over Wi-Fi** card (after the last message) | Opens the setup page on your home network and shows a QR code with the board's address. A click closes it; it closes by itself after 10 minutes. |
 | Quick press on the **Set up over Wi-Fi** card | Goes to the **Night mode** card (moon, and whether night mode is on now). Another press goes back to the dashboard. |
 | Hold 2 s on the **Night mode** card | Turns night mode **on now** (a nap in the afternoon; it ends when you turn it off, or after 12 h) or **off** — off for the rest of tonight's hours if it's the scheduled night. The scheduled hours don't change. |
+| Quick press on the **Night mode** card | Goes to the **Schedule** card (how many scheduled messages there are). Another press goes back to the dashboard. |
+| Hold 2 s on the **Schedule** card | Opens the schedules on the panel: text, time · duration · repeat and state. A quick press goes to the next one; 10 s without pressing goes back to normal. |
+| Hold on a schedule | A bar runs through four zones — *nothing* (gray), *delete today* (orange), *delete all* (red), *nothing* (gray) — and says what releasing now would do. **Releasing** does it: *delete today* skips today's occurrence (or the next one if today's is over) and keeps the series; *delete all* deletes the schedule, like `/cancel N`. |
 | Hold 5 s on the dashboard | Enters setup mode (and leaves it, without saving). |
 
 ### Screen rotation
@@ -202,6 +205,11 @@ when a reading leaves the range and one when it's back — "back" only counts on
 humidity) inside the range, so a value hovering at the limit doesn't flood you. Only new readings
 are checked. A checkbox adds a message when a sensor stops sending (the same moment it leaves the
 screen) and when it comes back. Alerts need the Telegram bot.
+
+**Comparisons.** Under **Compare sensors** on the setup page, pick two sensors (A × B), up to two
+pairs — say living room × outside. Each pair gets a page after the sensor pages with the
+difference A − B in the middle (orange when A is warmer, blue when cooler, and the humidity
+difference) and both readings on the sides. It shows only while both sensors have fresh readings.
 
 `tools/govee_probe.py` lists your sensors and watches their readings from a computer (it reads
 the key from the `GOVEE_API_KEY` environment variable).

@@ -89,11 +89,24 @@ void app_main(void)
                 lvgl_port_unlock();
             }
             held_ms += 20;
-            if (hold != UI_HOLD_NONE && !done && held_ms >= DELETE_START_MS) {
+            if (hold == UI_HOLD_ZONES) {
+                // a schedule: the bar runs through its zones, the action happens on release
+                if (held_ms >= DELETE_START_MS && held_ms % 60 == 0) {
+                    lvgl_port_lock(0);
+                    ui_zone_progress(held_ms);
+                    lvgl_port_unlock();
+                }
+            } else if (hold != UI_HOLD_NONE && !done && held_ms >= DELETE_START_MS) {
                 if (held_ms < DELETE_MS) {
                     lvgl_port_lock(0);
                     ui_hold_progress((held_ms - DELETE_START_MS) * 100 / (DELETE_MS - DELETE_START_MS));
                     lvgl_port_unlock();
+                } else if (hold == UI_HOLD_SCHED_OPEN) {
+                    lvgl_port_lock(0);
+                    ui_hold_progress(-1);
+                    ui_sched_open();
+                    lvgl_port_unlock();
+                    done = true;
                 } else if (hold == UI_HOLD_NIGHT) {
                     ESP_LOGI(TAG, "held 2 s: night mode on/off");
                     lvgl_port_lock(0);
@@ -143,6 +156,8 @@ void app_main(void)
             } else if (click) {
                 ui_hold_progress(-1);
                 ui_browse_next();
+            } else if (hold == UI_HOLD_ZONES) {
+                ui_zone_release(held_ms);
             } else if (hold != UI_HOLD_NONE && !done) {
                 ui_hold_progress(-1);   // released before 2 s: nothing happens
             }

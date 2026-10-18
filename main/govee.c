@@ -177,6 +177,34 @@ void govee_alerts_save(const govee_alert_t *in, int n)
     }
 }
 
+int govee_cmp_load(govee_cmp_t *out)
+{
+    memset(out, 0, GOVEE_CMP_MAX * sizeof(*out));
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = GOVEE_CMP_MAX * sizeof(*out);
+        if (nvs_get_blob(nvs, "cmp", out, &len) != ESP_OK || len != GOVEE_CMP_MAX * sizeof(*out)) {
+            memset(out, 0, GOVEE_CMP_MAX * sizeof(*out));
+        }
+        nvs_close(nvs);
+    }
+    int n = 0;
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {
+        n += out[i].a[0] && out[i].b[0];
+    }
+    return n;
+}
+
+void govee_cmp_save(const govee_cmp_t *in)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, "cmp", in, GOVEE_CMP_MAX * sizeof(*in));
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
 int govee_known(govee_ident_t *out, int max)
 {
     if (!s_lock) {
@@ -418,6 +446,7 @@ int govee_get(govee_sensor_t *out, int max, bool all)
         bool shown = visible(i, mono);
         if (s_track[i].has_value && (shown || all)) {
             out[n] = s_sensors[i];
+            strlcpy(out[n].device, s_track[i].device, sizeof(out[n].device));
             out[n++].shown = shown;
         }
     }

@@ -356,6 +356,75 @@ static void save_alerts(const char *body)
     config_set_u8("galert_q", form_value(body, "galert_q", on, sizeof(on)));
 }
 
+// Sensor comparisons: up to GOVEE_CMP_MAX pairs "A x B", each picked from the sensors on the account
+static void send_compare(httpd_req_t *req, const i18n_t *L)
+{
+    static govee_ident_t list[GOVEE_MAX + 2 * GOVEE_CMP_MAX];
+    static govee_cmp_t cmp[GOVEE_CMP_MAX];
+    govee_cmp_load(cmp);
+    int n = govee_known(list, GOVEE_MAX);
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {   // saved ones the panel hasn't seen (yet): listed by ID
+        const char *ids[] = {cmp[i].a, cmp[i].b};
+        for (int k = 0; k < 2; k++) {
+            bool found = !ids[k][0];
+            for (int j = 0; j < n && !found; j++) {
+                found = strcmp(list[j].device, ids[k]) == 0;
+            }
+            if (!found) {
+                strlcpy(list[n].device, ids[k], sizeof(list[n].device));
+                strlcpy(list[n].name, ids[k], sizeof(list[n].name));
+                n++;
+            }
+        }
+    }
+    out(req, "<label>");
+    out(req, L->p_cmp);
+    out(req, "</label><small>");
+    out(req, L->p_cmp_hint);
+    out(req, "</small>");
+    if (n < 2) {
+        out(req, "<small>");
+        out(req, L->p_alerts_none);
+        out(req, "</small>");
+        return;
+    }
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {
+        out(req, "<div class=hrs>");
+        const char *cur[] = {cmp[i].a, cmp[i].b};
+        for (int k = 0; k < 2; k++) {
+            char html[64];
+            snprintf(html, sizeof(html), "%s<select name=c%d%c><option value=''>&mdash;", k ? "<span>&times;</span>" : "",
+                     i, k ? 'b' : 'a');
+            out(req, html);
+            for (int j = 0; j < n; j++) {
+                out(req, "<option value=\"");
+                send_escaped(req, list[j].device);
+                out(req, strcmp(list[j].device, cur[k]) == 0 ? "\" selected>" : "\">");
+                send_escaped(req, list[j].name);
+            }
+            out(req, "</select>");
+        }
+        out(req, "</div>");
+    }
+}
+
+static void save_compare(const char *body)
+{
+    static govee_cmp_t cmp[GOVEE_CMP_MAX];
+    memset(cmp, 0, sizeof(cmp));
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "c%da", i);
+        form_value(body, key, cmp[i].a, sizeof(cmp[i].a));
+        snprintf(key, sizeof(key), "c%db", i);
+        form_value(body, key, cmp[i].b, sizeof(cmp[i].b));
+        if (!cmp[i].a[0] || !cmp[i].b[0] || strcmp(cmp[i].a, cmp[i].b) == 0) {
+            cmp[i].a[0] = cmp[i].b[0] = '\0';   // incomplete or the same sensor twice
+        }
+    }
+    govee_cmp_save(cmp);
+}
+
 // Night mode: checkbox + from/to hours
 static void send_night(httpd_req_t *req, const i18n_t *L)
 {
@@ -566,6 +635,7 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, L->p_govee_int_hint);
     out(req, "</small>");
     send_alerts(req, L);
+    send_compare(req, L);
     out(req, "<button>");
     out(req, L->p_save);
     char footer[96];
@@ -690,6 +760,7 @@ static esp_err_t save_post(httpd_req_t *req)
     config_set_u8("wx_on", form_value(body, "wx_on", num, sizeof(num)));   // unchecked boxes aren't sent
     config_set_u8("night_on", form_value(body, "night_on", num, sizeof(num)));
     save_alerts(body);
+    save_compare(body);
     static const char *const NIGHT[] = {"night_from", "night_to"};
     for (int i = 0; i < 2; i++) {
         if (form_value(body, NIGHT[i], num, sizeof(num))) {

@@ -394,7 +394,8 @@ static void send_list(int64_t chat_id)
         fmt_entry(&list[i], line, sizeof(line));
         // same rule as the screen: an occurrence deleted with the button isn't "on the panel"
         int st = sched_state(list[i].id);
-        const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed : NULL;
+        const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed :
+                          st == SCHED_SKIPPED ? T->sch_skipped : NULL;
         o += snprintf(out + o, sizeof(out) - o, "\n%d. %s%s%s%s\n   \xE2\x80\x9C%s\xE2\x80\x9D\n", i + 1, line,
                       tag ? "  (" : "", tag ? tag : "", tag ? ")" : "", list[i].text);
     }

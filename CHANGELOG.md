@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Long city names on the dashboard roll instead of being cut.
+- **Sensor comparisons**: pick up to two pairs of Govee sensors on the setup page; each gets a page
+  with the difference (A − B, colored warmer/cooler) and both readings.
+- Schedule browser: medium font at least (long texts roll slowly instead of shrinking) and more time
+  to read (20 s plus 1 s per 4 characters, up to two minutes); a rolling text finishes its turn
+  before the panel goes back to normal.
+- **Schedule card** after the night-mode card: browse the scheduled messages on the panel and
+  delete today's occurrence or the whole series with a hold bar that acts on release
+  (nothing / delete today / delete all / nothing). `/list` also shows "next one skipped".
+- Weather details page redesigned with widget-like tiles (feels like with the actual temperature,
+  UV and air with a level bar) and the rain chart across the width.
 ### Fixes
 
 - The RGB LED showed red as green and green as red (this board's LED takes RGB order, not the usual

@@ -4,6 +4,7 @@
 #include "i18n.h"
 #include "schedule.h"
 #include "emoji/emoji.h"
+#include "src/widgets/label/lv_label_private.h"   // label offset: is a rolling text back at the top?
 
 #include <stdio.h>
 #include <string.h>
@@ -85,6 +86,21 @@ static bool s_deleting;     // showing the "deleted" notice
 static bool s_card;         // browse mode on a card after the last message: "set up over Wi-Fi"...
 static bool s_card_night;   // ...or the next one, "night mode" (turn it on/off now)
 static lv_obj_t *s_card_img; // moon on the night-mode card
+static bool s_card_sched;   // ...then the schedule card
+static bool s_sv;           // browsing the schedules (opened from the schedule card)
+static sched_t s_sv_list[SCHED_MAX];
+static int s_sv_n, s_sv_idx;
+static lv_obj_t *s_sv_info;  // "18:00 · 30 min · every day · on the panel now"
+static lv_obj_t *s_zone, *s_zone_mark, *s_zone_lbl;   // hold bar: nothing / today / all / nothing
+static lv_obj_t *s_del_txt;
+static bool s_sv_roll;           // the schedule on screen is long and rolls up and down
+static lv_timer_t *s_roll_wait;  // time's up: waiting for the roll to get back to the top
+// hold on a schedule (ms since the press): the action is decided when the button is released
+#define ZONE_START     300
+#define ZONE_TODAY     1200
+#define ZONE_ALL       2700
+#define ZONE_NONE2     4200
+#define ZONE_END       5000
 static bool s_lan;          // setup page open on the home network
 static char s_lan_url[48];
 static lv_obj_t *s_lan_panel;
@@ -112,6 +128,9 @@ static lv_obj_t *s_wx_panel;     // weather details, right after the dashboard
 static bool s_wx_page;           // on screen
 static bool s_wx_on = true;      // setup page option
 static int s_wx_s = CYCLE_DEFAULT_S;
+static lv_obj_t *s_cmp_panel;    // sensor comparisons, after the sensor pages
+static int s_cmp = -1;           // comparison page on screen; -1 = none
+static govee_cmp_t s_cmps[GOVEE_CMP_MAX];
 static lv_obj_t *s_city_panel;   // other cities, after the dashboard
 static lv_obj_t *s_city_time;
 static lv_obj_t *s_city_ampm;
@@ -467,6 +486,115 @@ static void render_night_card(int aw)
     lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
 }
 
+// "18:00 · 30 min · every day" (or "25/10 18:00 · 1 h · once")
+static void sched_line(const sched_t *sc, char *out, size_t size)
+{
+    char when[24], dur[16];
+    if (sc->repeat == REPEAT_ONCE) {
+        time_t t = (time_t)sc->start;
+        struct tm tm;
+        localtime_r(&t, &tm);
+        char hm[12];
+        clock_fmt(hm, sizeof(hm), tm.tm_hour, tm.tm_min);
+        snprintf(when, sizeof(when), "%02d/%02d %s", T->month_first ? tm.tm_mon + 1 : tm.tm_mday,
+                 T->month_first ? tm.tm_mday : tm.tm_mon + 1, hm);
+    } else {
+        clock_fmt(when, sizeof(when), sc->hour, sc->minute);
+    }
+    int m = sc->dur_min;
+    if (m < 60) {
+        snprintf(dur, sizeof(dur), "%d min", m);
+    } else if (m < 1440) {
+        snprintf(dur, sizeof(dur), m % 60 ? "%dh%02d" : "%d h", m / 60, m % 60);
+    } else {
+        snprintf(dur, sizeof(dur), "%d d", m / 1440);
+    }
+    snprintf(out, size, "%s \xC2\xB7 %s \xC2\xB7 %s", when, dur, T->repeat[sc->repeat % 4]);
+}
+
+static void render_sched_card(int aw)
+{
+    label_fmt(s_msg_title, LV_SYMBOL_BELL "  %s", T->sv_card_title);
+    lv_obj_set_style_text_color(s_msg_title, COLOR_ACCENT, 0);
+    lv_label_set_text(s_msg_when, "");
+    lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_card_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_transform_scale(s_msg_label, 256, 0);
+    lv_obj_set_style_text_font(s_msg_label, &font_pt_20, 0);
+    lv_label_set_long_mode(s_msg_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(s_msg_label, aw, LV_SIZE_CONTENT);
+    if (s_sv_n == 0) {
+        lv_label_set_text(s_msg_label, T->sv_card_empty);
+    } else if (s_sv_n == 1) {
+        lv_label_set_text(s_msg_label, T->sv_count_one);
+    } else {
+        label_fmt(s_msg_label, T->sv_count_fmt, s_sv_n);
+    }
+    lv_obj_set_style_text_color(s_msg_label, lv_color_white(), 0);
+    lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (s_msg_top - MSG_BOTTOM) / 2);
+    lv_label_set_text(s_msg_hint, s_sv_n ? T->sv_card_hint : "");
+    lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
+// One schedule: its text in the largest font that fits, its time/duration/repeat and state below
+static void render_sched_view(int aw, int ah)
+{
+    if (s_sv_idx >= s_sv_n) {
+        s_sv_idx = s_sv_n - 1;
+    }
+    const sched_t *sc = &s_sv_list[s_sv_idx];
+    char title[48];
+    snprintf(title, sizeof(title), T->sv_title_fmt, s_sv_idx + 1, s_sv_n);
+    label_fmt(s_msg_title, LV_SYMBOL_BELL "  %s", title);
+    lv_obj_set_style_text_color(s_msg_title, COLOR_ACCENT, 0);
+    lv_label_set_text(s_msg_when, "");
+    lv_obj_add_flag(s_card_info, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_card_img, LV_OBJ_FLAG_HIDDEN);
+
+    char line[96];
+    sched_line(sc, line, sizeof(line));
+    int st = sched_state(sc->id);
+    const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed :
+                      st == SCHED_SKIPPED ? T->sch_skipped : NULL;
+    if (tag) {
+        size_t l = strlen(line);
+        snprintf(line + l, sizeof(line) - l, "\n%s", tag);
+    }
+    lv_label_set_text(s_sv_info, line);
+    // the first line always at the same height, with or without the state line under it
+    int vh = lv_display_get_vertical_resolution(NULL);
+    lv_obj_align(s_sv_info, LV_ALIGN_TOP_MID, 0, vh - MSG_BOTTOM - 2 - 2 * lv_font_get_line_height(&font_pt_12));
+    lv_obj_set_style_text_color(s_sv_info, st == SCHED_ON_SCREEN ? COLOR_ACCENT : COLOR_MUTED, 0);
+    lv_obj_remove_flag(s_sv_info, LV_OBJ_FLAG_HIDDEN);
+
+    int th = ah - 34;   // room for the two info lines
+    // big font, or the medium one; never the small one here: it rolls slowly instead
+    const lv_font_t *f28 = emoji_font(&font_pt_28), *f20 = emoji_font(&font_pt_20);
+    lv_point_t sz;
+    lv_text_get_size(&sz, sc->text, f28, 0, 0, aw, LV_TEXT_FLAG_NONE);
+    const lv_font_t *font = sz.y <= th ? f28 : f20;
+    lv_text_get_size(&sz, sc->text, f20, 0, 0, aw, LV_TEXT_FLAG_NONE);
+    bool roll = font == f20 && sz.y > th;
+    s_sv_roll = roll;
+    lv_obj_set_style_transform_scale(s_msg_label, 256, 0);
+    lv_obj_set_style_text_color(s_msg_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_msg_label, font, 0);
+    lv_label_set_long_mode(s_msg_label, roll ? LV_LABEL_LONG_MODE_SCROLL : LV_LABEL_LONG_WRAP);
+    if (roll) {
+        // LVGL's scroll mode makes the label one long line rolling sideways; keep the line breaks so
+        // it rolls up and down instead (much easier to read)
+        ((lv_label_t *)s_msg_label)->expand = 0;
+    }
+    lv_obj_set_style_anim_duration(s_msg_label, roll ? 12000 : 0, 0);
+    lv_obj_set_size(s_msg_label, aw, roll ? th : LV_SIZE_CONTENT);
+    // time to read it: 20 s plus 1 s per 4 characters, up to two minutes
+    s_browse_left = LV_MIN(120, 20 + (int)strlen(sc->text) / 4);
+    lv_label_set_text(s_msg_label, sc->text);
+    lv_obj_align(s_msg_label, LV_ALIGN_CENTER, 0, (s_msg_top - MSG_BOTTOM - 34) / 2);
+    lv_label_set_text(s_msg_hint, T->sv_hint);
+    lv_obj_remove_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void render_message(void)
 {
     if (!s_msg_panel) {
@@ -475,6 +603,16 @@ static void render_message(void)
     int w = lv_display_get_horizontal_resolution(NULL);
     int h = lv_display_get_vertical_resolution(NULL);
     int aw = w - 24, ah = h - s_msg_top - MSG_BOTTOM;
+    lv_obj_add_flag(s_sv_info, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_zone, LV_OBJ_FLAG_HIDDEN);
+    if (s_card && s_sv) {
+        render_sched_view(aw, ah);
+        return;
+    }
+    if (s_card && s_card_sched) {
+        render_sched_card(aw);
+        return;
+    }
     if (s_card && s_card_night) {
         render_night_card(aw);
         return;
@@ -577,17 +715,18 @@ static void render_message(void)
 }
 
 // Pages over the dashboard (top layer): messages/setup card, sensor pages, other cities
-enum { OV_NONE, OV_MSG, OV_SENS, OV_CITY, OV_WX };
+enum { OV_NONE, OV_MSG, OV_SENS, OV_CITY, OV_WX, OV_CMP };
 
 static int overlay_now(void)
 {
-    return s_idx >= 0 || s_card ? OV_MSG : s_sens >= 0 ? OV_SENS : s_city >= 0 ? OV_CITY : s_wx_page ? OV_WX : OV_NONE;
+    return s_idx >= 0 || s_card ? OV_MSG : s_sens >= 0 ? OV_SENS : s_city >= 0 ? OV_CITY : s_wx_page ? OV_WX :
+           s_cmp >= 0 ? OV_CMP : OV_NONE;
 }
 
 static lv_obj_t *overlay_obj(int ov)
 {
     return ov == OV_MSG ? s_msg_panel : ov == OV_SENS ? s_sens_panel : ov == OV_CITY ? s_city_panel :
-           ov == OV_WX ? s_wx_panel : NULL;
+           ov == OV_WX ? s_wx_panel : ov == OV_CMP ? s_cmp_panel : NULL;
 }
 
 // Shows overlay "next" (already rendered) after "prev": fades over the dashboard, cuts between pages
@@ -600,7 +739,7 @@ static void present(int prev, int next)
         }
         return;
     }
-    for (int ov = OV_MSG; ov <= OV_WX; ov++) {
+    for (int ov = OV_MSG; ov <= OV_CMP; ov++) {
         if (ov != next && overlay_obj(ov)) {
             lv_obj_add_flag(overlay_obj(ov), LV_OBJ_FLAG_HIDDEN);
         }
@@ -619,9 +758,12 @@ static void show(int idx)
     int prev = overlay_now();
     s_card = false;
     s_card_night = false;
+    s_card_sched = false;
+    s_sv = false;
     s_idx = idx;
     s_sens = -1;
     s_city = -1;
+    s_cmp = -1;
     s_wx_page = false;
     if (!s_msg_panel) {
         return;
@@ -656,6 +798,7 @@ static void show_card(void)
     s_card = true;
     s_sens = -1;
     s_city = -1;
+    s_cmp = -1;
     s_wx_page = false;
     if (!s_msg_panel) {
         return;
@@ -766,8 +909,11 @@ static void show_sensors(int page)
     s_idx = -1;
     s_card = false;
     s_card_night = false;
+    s_card_sched = false;
+    s_sv = false;
     s_sens = page;
     s_city = -1;
+    s_cmp = -1;
     s_wx_page = false;
     if (!s_sens_panel) {
         return;
@@ -885,9 +1031,45 @@ static void build_message_panel(int w, int h)
     lv_obj_set_flex_align(s_del_done, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *icon = label(s_del_done, &font_pt_28, lv_color_hex(0xff4d4f));
     lv_label_set_text(icon, LV_SYMBOL_TRASH);
-    lv_obj_t *txt = label(s_del_done, &font_pt_20, lv_color_hex(0xff4d4f));
-    lv_label_set_text(txt, T->msg_deleted);
+    s_del_txt = label(s_del_done, &font_pt_20, lv_color_hex(0xff4d4f));
+    lv_label_set_text(s_del_txt, T->msg_deleted);
     lv_obj_add_flag(s_del_done, LV_OBJ_FLAG_HIDDEN);
+
+    // schedule browser: info line and the hold bar with its four zones
+    // two fixed lines (time · duration · repeat, then the state): nothing rolls away while you read
+    s_sv_info = label(s_msg_panel, &font_pt_12, COLOR_MUTED);
+    lv_label_set_long_mode(s_sv_info, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_sv_info, w - 20);
+    lv_obj_set_style_text_align(s_sv_info, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_sv_info, LV_ALIGN_BOTTOM_MID, 0, -(MSG_BOTTOM + 2));
+    lv_obj_add_flag(s_sv_info, LV_OBJ_FLAG_HIDDEN);
+    s_zone = lv_obj_create(s_msg_panel);
+    lv_obj_remove_style_all(s_zone);
+    lv_obj_set_size(s_zone, w - 20, 10);
+    lv_obj_align(s_zone, LV_ALIGN_BOTTOM_MID, 0, -6);
+    static const uint32_t ZCOL[] = {0x5a6478, 0xff9800, 0xff4d4f, 0x5a6478};
+    const int zt[] = {ZONE_START, ZONE_TODAY, ZONE_ALL, ZONE_NONE2, ZONE_END};
+    int zw = w - 20;
+    for (int z = 0; z < 4; z++) {
+        lv_obj_t *seg = lv_obj_create(s_zone);
+        lv_obj_remove_style_all(seg);
+        int x0 = (zt[z] - ZONE_START) * zw / (ZONE_END - ZONE_START);
+        int x1 = (zt[z + 1] - ZONE_START) * zw / (ZONE_END - ZONE_START);
+        lv_obj_set_size(seg, x1 - x0 - 2, 10);
+        lv_obj_set_pos(seg, x0 + 1, 0);
+        lv_obj_set_style_radius(seg, 3, 0);
+        lv_obj_set_style_bg_color(seg, lv_color_hex(ZCOL[z]), 0);
+        lv_obj_set_style_bg_opa(seg, LV_OPA_60, 0);
+    }
+    s_zone_mark = lv_obj_create(s_zone);
+    lv_obj_remove_style_all(s_zone_mark);
+    lv_obj_set_size(s_zone_mark, 4, 10);
+    lv_obj_set_style_bg_color(s_zone_mark, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_zone_mark, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_zone_mark, 2, 0);
+    lv_obj_add_flag(s_zone, LV_OBJ_FLAG_HIDDEN);
+    s_zone_lbl = label(s_msg_panel, &font_pt_14, lv_color_white());
+    lv_obj_add_flag(s_zone_lbl, LV_OBJ_FLAG_HIDDEN);
 
     if (s_idx >= s_n) {
         s_idx = -1;
@@ -905,41 +1087,50 @@ static bool wx_available(void)
     return s_wx_on && s_has_weather;
 }
 
-// colored pill: "3  moderate"
-static lv_obj_t *pill(lv_obj_t *parent, uint32_t color, const char *text)
+// Widget-like tile: name on top, big value, level below and a thin level bar at the bottom.
+// Landscape: tall tiles side by side; portrait: wide tiles stacked (value on the right).
+static void wx_tile(lv_obj_t *parent, int x, int y, int w, int h, bool wide, const char *name, const char *value,
+                    uint32_t value_color, const char *level, uint32_t level_color, int frac_pct)
 {
-    lv_obj_t *p = lv_obj_create(parent);
-    lv_obj_remove_style_all(p);
-    lv_obj_set_size(p, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(p, lv_color_hex(color), 0);
-    lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(p, 6, 0);
-    lv_obj_set_style_pad_hor(p, 6, 0);
-    lv_obj_set_style_pad_ver(p, 1, 0);
-    lv_obj_t *l = label(p, &font_pt_14, lv_color_hex(0x0b0f1a));
-    lv_label_set_text(l, text);
-    return p;
-}
-
-// small muted name, and below it the value with an optional pill (fits a 160 px column)
-static void wx_row(lv_obj_t *parent, int x, int y, const char *name, const char *value, uint32_t color, const char *pill_text)
-{
-    lv_obj_t *n = label(parent, &font_pt_12, COLOR_MUTED);
+    lv_obj_t *t = card(parent, x, y, w, h);
+    lv_obj_set_style_pad_all(t, 6, 0);
+    int iw = w - 12;
+    lv_obj_t *n = label(t, &font_pt_12, COLOR_MUTED);
+    one_line(n, wide ? iw / 2 + 10 : iw);
     lv_label_set_text(n, name);
-    lv_obj_set_pos(n, x, y);
-    lv_obj_t *v = label(parent, &font_pt_20, lv_color_white());
+    lv_obj_set_pos(n, 0, 0);
+    lv_obj_t *v = label(t, &font_pt_28, lv_color_hex(value_color));
     lv_label_set_text(v, value);
-    lv_obj_set_pos(v, x, y + 14);
-    if (pill_text) {
-        lv_obj_t *p = pill(parent, color, pill_text);
-        lv_obj_update_layout(v);
-        lv_obj_align_to(p, v, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
+    lv_obj_t *l = label(t, &font_pt_12, lv_color_hex(level_color));
+    scroll_line(l, wide ? iw / 2 + 20 : iw);
+    lv_label_set_text(l, level);
+    if (wide) {
+        lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, -2);
+        lv_obj_set_pos(l, 0, h - 12 - 22);
+    } else {
+        lv_obj_set_pos(v, 0, 10);
+        lv_obj_set_pos(l, 0, h - 12 - 18);
+    }
+    if (frac_pct >= 0) {   // where the value sits on its scale
+        lv_obj_t *track = lv_obj_create(t);
+        lv_obj_remove_style_all(track);
+        lv_obj_set_size(track, iw, 3);
+        lv_obj_align(track, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_set_style_radius(track, 2, 0);
+        lv_obj_set_style_bg_color(track, lv_color_hex(0x2a3348), 0);
+        lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+        lv_obj_t *fill = lv_obj_create(track);
+        lv_obj_remove_style_all(fill);
+        lv_obj_set_size(fill, LV_MAX(3, iw * LV_MIN(frac_pct, 100) / 100), 3);
+        lv_obj_set_style_radius(fill, 2, 0);
+        lv_obj_set_style_bg_color(fill, lv_color_hex(level_color), 0);
+        lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
     }
 }
 
 /*
- * Landscape: feels like / UV / air on the left, rain chance per hour on the right.
- * Portrait: the three rows on top, the rain chart below.
+ * Landscape: three tiles (feels like, UV, air) across the top, the rain chart across the bottom.
+ * Portrait: the three tiles stacked, the rain chart below.
  */
 static void render_wx(void)
 {
@@ -966,43 +1157,58 @@ static void render_wx(void)
     // UV (WHO scale) and European AQI bands with their usual colors
     static const uint32_t UV_COLOR[] = {0x4caf50, 0xfdd835, 0xff9800, 0xf44336, 0xab47bc};
     static const uint32_t AQI_COLOR[] = {0x50f0e6, 0x50ccaa, 0xf0e641, 0xff5050, 0xd04070, 0xab47bc};
-    float uv = w->uv > 0.4f ? w->uv : w->uv_max;   // at night show today's max instead of 0
+    bool night_uv = w->uv <= 0.4f;   // at night "now" is always 0: show today's max
+    float uv = night_uv ? w->uv_max : w->uv;
     int uvi = (int)(uv + 0.5f);
     int uvl = uvi <= 2 ? 0 : uvi <= 5 ? 1 : uvi <= 7 ? 2 : uvi <= 10 ? 3 : 4;
     int aql = w->aqi < 0 ? -1 : w->aqi <= 20 ? 0 : w->aqi <= 40 ? 1 : w->aqi <= 60 ? 2 : w->aqi <= 80 ? 3 :
               w->aqi <= 100 ? 4 : 5;
 
-    char v[24], name[48];
-    int x = 10, y = 38, step = 42;
-    snprintf(v, sizeof(v), "%.0f" DEG, temp_unit(w->feels));
-    wx_row(s_wx_panel, x, y, T->wx_feels, v, 0, NULL);
-    snprintf(v, sizeof(v), "%d", uvi);
-    if (w->uv <= 0.4f) {   // night: the number is today's max, say so
-        snprintf(name, sizeof(name), "%s \xC2\xB7 ", T->wx_uv);
-        size_t l = strlen(name);
-        strlcpy(name + l, T->wx_uv_max_fmt, sizeof(name) - l);
-    } else {
-        strlcpy(name, T->wx_uv, sizeof(name));
-    }
-    wx_row(s_wx_panel, x, y + step, name, v, UV_COLOR[uvl], T->uv_level[uvl]);
-    if (aql >= 0) {
-        snprintf(v, sizeof(v), "%d", w->aqi);
-        wx_row(s_wx_panel, x, y + 2 * step, T->wx_air, v, AQI_COLOR[aql], T->aqi_level[aql]);
+    // tiles
+    int n_tiles = aql >= 0 ? 3 : 2, gap = 6;
+    int tw = landscape ? (sw - 20 - gap * (n_tiles - 1)) / n_tiles : sw - 20;
+    int th = landscape ? 66 : 52;
+    char v[16], lvl[48], name[48];
+    for (int k = 0; k < n_tiles; k++) {
+        int x = landscape ? 10 + k * (tw + gap) : 10;
+        int y = landscape ? 38 : 38 + k * (th + gap);
+        if (k == 0) {
+            snprintf(v, sizeof(v), "%.0f" DEG, temp_unit(w->feels));
+            snprintf(lvl, sizeof(lvl), "%s %.0f" DEG, T->wx_real, temp_unit(w->temp));
+            wx_tile(s_wx_panel, x, y, tw, th, !landscape, T->wx_feels, v, 0xffffff, lvl, 0xbac4d6, -1);
+        } else if (k == 1) {
+            snprintf(v, sizeof(v), "%d", uvi);
+            if (night_uv) {
+                snprintf(name, sizeof(name), "%s \xC2\xB7 %s", T->wx_uv, T->wx_uv_max_fmt);
+            } else {
+                strlcpy(name, T->wx_uv, sizeof(name));
+            }
+            wx_tile(s_wx_panel, x, y, tw, th, !landscape, name, v, UV_COLOR[uvl], T->uv_level[uvl], UV_COLOR[uvl],
+                    uvi * 100 / 11);
+        } else {
+            snprintf(v, sizeof(v), "%d", w->aqi);
+            wx_tile(s_wx_panel, x, y, tw, th, !landscape, T->wx_air, v, AQI_COLOR[aql], T->aqi_level[aql],
+                    AQI_COLOR[aql], w->aqi);
+        }
     }
 
-    // rain chance per hour: bar chart
-    int cx = landscape ? 160 : 10, cy = landscape ? 40 : 172;
-    int cw = landscape ? sw - cx - 10 : sw - 20, ch = landscape ? sh - cy - 6 : sh - cy - 8;
-    lv_obj_t *rt = label(s_wx_panel, &font_pt_12, COLOR_MUTED);
-    lv_label_set_text(rt, T->wx_rain);
-    lv_obj_set_pos(rt, cx, cy);
-    int n = w->n_rain, gap = 4;
+    // rain chance per hour: bar chart across the width
+    int cx = 10, cw = sw - 20;
+    int cy = landscape ? 38 + th + 6 : 38 + n_tiles * (th + gap) + 4;
+    int bottom = sh - 20;   // hours below
+    int n = w->n_rain;
+    if (!landscape) {
+        lv_obj_t *rt = label(s_wx_panel, &font_pt_12, COLOR_MUTED);
+        lv_label_set_text(rt, T->wx_rain);
+        lv_obj_set_pos(rt, cx, cy);
+        cy += 16;
+    }
     if (n <= 0) {
         return;
     }
-    gap += landscape ? 1 : 2;
-    int bw = (cw - gap * (n - 1)) / n;
-    int top = cy + 18 + 16, bottom = cy + ch - 18;   // room for the % above and the hour below
+    int bgap = landscape ? 8 : 5;
+    int bw = (cw - bgap * (n - 1)) / n;
+    int top = cy + 15;   // room for the % above the tallest bar
     int best = 0;
     for (int i = 1; i < n; i++) {
         if (w->rain_pct[i] > w->rain_pct[best]) {
@@ -1012,18 +1218,18 @@ static void render_wx(void)
     for (int i = 0; i < n; i++) {
         int pct = w->rain_pct[i] < 0 ? 0 : w->rain_pct[i] > 100 ? 100 : w->rain_pct[i];
         int bh = LV_MAX(3, (bottom - top) * pct / 100);
-        int bx = cx + i * (bw + gap);
+        int bx = cx + i * (bw + bgap);
         lv_obj_t *b = lv_obj_create(s_wx_panel);
         lv_obj_remove_style_all(b);
         lv_obj_set_size(b, bw, bh);
         lv_obj_set_pos(b, bx, bottom - bh);
-        lv_obj_set_style_radius(b, 3, 0);
+        lv_obj_set_style_radius(b, 4, 0);
         lv_obj_set_style_bg_color(b, lv_color_hex(pct >= 50 ? 0x1e88e5 : 0x42a5f5), 0);
         lv_obj_set_style_bg_opa(b, pct >= 20 ? LV_OPA_COVER : LV_OPA_50, 0);
 
-        // % above the bar and the hour below, each as wide as its text and centered on the bar
+        // % above the bar and the hour below, centered on the bar
         lv_obj_t *pl = label(s_wx_panel, &font_pt_12, i == best && pct > 0 ? lv_color_white() : COLOR_MUTED);
-        label_fmt(pl, "%d", pct);
+        label_fmt(pl, landscape ? "%d%%" : "%d", pct);
         lv_obj_update_layout(pl);
         lv_obj_set_pos(pl, bx + (bw - lv_obj_get_width(pl)) / 2, bottom - bh - 15);
 
@@ -1032,7 +1238,7 @@ static void render_wx(void)
         if (g_cfg.h12) {
             label_fmt(hl, "%d%c", hr % 12 ? hr % 12 : 12, hr < 12 ? 'a' : 'p');
         } else {
-            label_fmt(hl, "%d", hr);
+            label_fmt(hl, landscape ? "%dh" : "%d", hr);
         }
         lv_obj_update_layout(hl);
         lv_obj_set_pos(hl, bx + (bw - lv_obj_get_width(hl)) / 2, bottom + 2);
@@ -1045,8 +1251,11 @@ static void show_wx(void)
     s_idx = -1;
     s_card = false;
     s_card_night = false;
+    s_card_sched = false;
+    s_sv = false;
     s_sens = -1;
     s_city = -1;
+    s_cmp = -1;
     s_wx_page = true;
     if (!s_wx_panel) {
         return;
@@ -1068,6 +1277,153 @@ static void build_wx_panel(int w, int h)
     } else {
         s_wx_page = false;
         lv_obj_add_flag(s_wx_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// ---------- sensor comparisons ----------
+
+// The k-th comparison whose two sensors are on the screen now; false if there's none
+static bool cmp_pair(int k, const govee_sensor_t **a, const govee_sensor_t **b)
+{
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {
+        const govee_sensor_t *ga = NULL, *gb = NULL;
+        for (int j = 0; j < s_ng; j++) {
+            if (s_cmps[i].a[0] && strcmp(s_govee[j].device, s_cmps[i].a) == 0) {
+                ga = &s_govee[j];
+            }
+            if (s_cmps[i].b[0] && strcmp(s_govee[j].device, s_cmps[i].b) == 0) {
+                gb = &s_govee[j];
+            }
+        }
+        if (ga && gb && k-- == 0) {
+            *a = ga;
+            *b = gb;
+            return true;
+        }
+    }
+    return false;
+}
+
+static int cmp_pages(void)
+{
+    const govee_sensor_t *a, *b;
+    int n = 0;
+    while (n < GOVEE_CMP_MAX && cmp_pair(n, &a, &b)) {
+        n++;
+    }
+    return n;
+}
+
+static void cmp_side(lv_obj_t *parent, int x, int y, int w, int h, const govee_sensor_t *g)
+{
+    lv_obj_t *c = card(parent, x, y, w, h);
+    lv_obj_t *n = label(c, &font_pt_12, COLOR_MUTED);
+    scroll_line(n, w - 16);
+    lv_label_set_text(n, g->name);
+    lv_obj_t *t = label(c, &font_pt_20, lv_color_white());
+    label_fmt(t, "%.1f" DEG, temp_unit(g->temp_c));
+    lv_obj_set_pos(t, 0, 16);
+    if (g->humidity >= 0) {
+        lv_obj_t *hu = label(c, &font_pt_14, COLOR_MUTED);
+        label_fmt(hu, "%.0f%%", g->humidity);
+        lv_obj_set_pos(hu, 0, 42);
+    }
+}
+
+/*
+ * Landscape: A on the left, B on the right, the difference (A - B) big in the middle.
+ * Portrait: A on top, the difference, B below.
+ */
+static void render_cmp(void)
+{
+    const govee_sensor_t *a, *b;
+    if (!s_cmp_panel || s_cmp < 0 || !cmp_pair(s_cmp, &a, &b)) {
+        return;
+    }
+    lv_obj_clean(s_cmp_panel);
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    bool landscape = w > h;
+
+    lv_obj_t *title = label(s_cmp_panel, &font_pt_14, COLOR_ACCENT);
+    scroll_line(title, w - 20);
+    int pages = cmp_pages();
+    if (pages > 1) {
+        label_fmt(title, LV_SYMBOL_SHUFFLE "  %s  %d/%d", T->cmp_title, s_cmp + 1, pages);
+    } else {
+        label_fmt(title, LV_SYMBOL_SHUFFLE "  %s", T->cmp_title);
+    }
+    lv_obj_set_pos(title, 10, 8);
+    lv_obj_t *bar = lv_obj_create(s_cmp_panel);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, w - 20, 2);
+    lv_obj_set_pos(bar, 10, 30);
+    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
+
+    // difference in the panel's unit: warmer orange, cooler blue
+    float d = (a->temp_c - b->temp_c) * (s_fahrenheit ? 9.0f / 5.0f : 1.0f);
+    bool same = d > -0.15f && d < 0.15f;
+    lv_obj_t *dl = label(s_cmp_panel, &font_pt_28, same ? lv_color_white() :
+                                                   d > 0 ? lv_color_hex(0xff8a65) : COLOR_ACCENT);
+    if (same) {
+        label_fmt(dl, "= 0" DEG);
+    } else {
+        label_fmt(dl, "%+.1f" DEG, d);
+    }
+    lv_obj_t *dh = label(s_cmp_panel, &font_pt_12, COLOR_MUTED);
+    lv_obj_set_style_text_align(dh, LV_TEXT_ALIGN_CENTER, 0);
+    if (same) {
+        lv_label_set_text(dh, T->cmp_same);
+    } else if (a->humidity >= 0 && b->humidity >= 0) {
+        label_fmt(dh, T->cmp_hum_fmt, a->humidity - b->humidity);
+    }
+    if (landscape) {
+        int cw = 96, ch = h - 46;
+        cmp_side(s_cmp_panel, 10, 40, cw, ch, a);
+        cmp_side(s_cmp_panel, w - 10 - cw, 40, cw, ch, b);
+        lv_obj_align(dl, LV_ALIGN_CENTER, 0, 2);
+        lv_obj_align(dh, LV_ALIGN_CENTER, 0, 32);
+    } else {
+        int cw = w - 20, ch = 80;
+        cmp_side(s_cmp_panel, 10, 40, cw, ch, a);
+        cmp_side(s_cmp_panel, 10, h - 8 - ch, cw, ch, b);
+        lv_obj_align(dl, LV_ALIGN_CENTER, 0, -8);
+        lv_obj_align(dh, LV_ALIGN_CENTER, 0, 22);
+    }
+}
+
+static void show_cmp(int k)
+{
+    int prev = overlay_now();
+    s_idx = -1;
+    s_card = false;
+    s_sens = -1;
+    s_city = -1;
+    s_wx_page = false;
+    s_cmp = k;
+    if (!s_cmp_panel) {
+        return;
+    }
+    render_cmp();
+    present(prev, OV_CMP);
+}
+
+static void build_cmp_panel(int w, int h)
+{
+    s_cmp_panel = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_cmp_panel);
+    lv_obj_set_size(s_cmp_panel, w, h);
+    lv_obj_set_style_bg_color(s_cmp_panel, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_cmp_panel, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(s_cmp_panel, LV_OBJ_FLAG_SCROLLABLE);
+    if (s_cmp >= cmp_pages()) {
+        s_cmp = -1;
+    }
+    if (s_cmp >= 0) {
+        render_cmp();
+    } else {
+        lv_obj_add_flag(s_cmp_panel, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -1192,8 +1548,11 @@ static void show_city(int i)
     s_idx = -1;
     s_card = false;
     s_card_night = false;
+    s_card_sched = false;
+    s_sv = false;
     s_sens = -1;
     s_city = i;
+    s_cmp = -1;
     s_wx_page = false;
     if (!s_city_panel) {
         return;
@@ -1214,6 +1573,7 @@ static void build_city_panel(int w, int h)
     s_city_ampm = NULL;
     if (s_city >= s_ncities) {
         s_city = -1;
+    s_cmp = -1;
     }
     if (s_city >= 0) {
         render_city();
@@ -1237,18 +1597,33 @@ void ui_set_cities(const city_wx_t *c, int n)
     }
 }
 
+static void roll_wait_cb(lv_timer_t *t)
+{
+    bool done = !s_browse || !s_sv || !s_sv_roll || s_browse_left > 0 ||   // left already, or the button was used
+                (((lv_label_t *)s_msg_label)->offset.x == 0 &&             // the roll finished a full turn
+                 ((lv_label_t *)s_msg_label)->offset.y == 0);
+    if (!done) {
+        return;
+    }
+    lv_timer_delete(t);
+    s_roll_wait = NULL;
+    if (s_browse && s_sv && s_browse_left <= 0) {
+        exit_browse();
+    }
+}
+
 // Normal cycle: dashboard, weather details, other cities, sensor pages, then each active message.
 // Position: -1 dashboard, then cities, sensor pages and messages in a row.
 static int cycle_pos(void)
 {
-    int nw = wx_available(), nc = s_ncities, np = sens_pages();
+    int nw = wx_available(), nc = s_ncities, np = sens_pages(), nm = cmp_pages();
     return s_wx_page ? 0 : s_city >= 0 ? nw + s_city : s_sens >= 0 ? nw + nc + s_sens :
-           s_idx >= 0 ? nw + nc + np + s_idx : -1;
+           s_cmp >= 0 ? nw + nc + np + s_cmp : s_idx >= 0 ? nw + nc + np + nm + s_idx : -1;
 }
 
 static void show_pos(int p)
 {
-    int nw = wx_available(), nc = s_ncities, np = sens_pages();
+    int nw = wx_available(), nc = s_ncities, np = sens_pages(), nm = cmp_pages();
     if (p < 0) {
         s_left = s_dash_s;
         show(-1);
@@ -1261,9 +1636,12 @@ static void show_pos(int p)
     } else if (p < nw + nc + np) {
         s_left = s_sens_s;
         show_sensors(p - nw - nc);
+    } else if (p < nw + nc + np + nm) {
+        s_left = s_sens_s;   // comparisons take the sensor pages' time
+        show_cmp(p - nw - nc - np);
     } else {
         s_left = s_msg_s;
-        show(p - nw - nc - np);
+        show(p - nw - nc - np - nm);
     }
 }
 
@@ -1274,14 +1652,20 @@ static void message_cycle(void)
     }
     if (s_browse) {
         if (--s_browse_left <= 0) {
-            exit_browse();
+            if (s_card && s_sv && s_sv_roll) {
+                if (!s_roll_wait) {   // a long schedule rolling: leave when the text is back at the top
+                    s_roll_wait = lv_timer_create(roll_wait_cb, 100, NULL);
+                }
+            } else {
+                exit_browse();
+            }
         }
         return;
     }
     if (s_night_rem || s_night_msg_left > 0) {
         return;   // night: only the new message, or the clock and the reminder taking turns (night_tick)
     }
-    int total = wx_available() + s_ncities + sens_pages() + s_n;
+    int total = wx_available() + s_ncities + sens_pages() + cmp_pages() + s_n;
     if (total == 0) {
         if (overlay_now() != OV_NONE) {
             show(-1);
@@ -1302,10 +1686,11 @@ static void poll_cb(lv_timer_t *t)
     if (ver != s_govee_ver && !s_config_mode) {
         s_govee_ver = ver;
         s_ng = govee_get(s_govee, GOVEE_MAX, false);
-        if (s_sens >= sens_pages()) {
+        if (s_sens >= sens_pages() || s_cmp >= cmp_pages()) {
             show(-1);
         } else {
             render_sensors();
+            render_cmp();
         }
     }
     uint32_t ev = msg_take_events();
@@ -1370,18 +1755,33 @@ bool ui_browse_next(void)
         }
         return true;
     }
-    if (s_card && !s_card_night) {   // setup card -> night-mode card
-        s_browse_left = BROWSE_S;
-        s_card_night = true;
-        render_message();
-        return true;
-    }
-    if (s_card) {
-        if (s_card_night) {
-            s_wake_left = 0;   // leaving the night-mode card: if night mode is on, go straight to the clock
+    // cards after the messages: setup -> night mode -> schedules -> dashboard
+    s_browse_left = BROWSE_S;
+    if (s_card && s_sv) {            // browsing the schedules: next one, then out
+        if (s_sv_idx + 1 < s_sv_n) {
+            s_sv_idx++;
+            render_message();
+            return true;
         }
         exit_browse();
         return false;
+    }
+    if (s_card && s_card_sched) {
+        exit_browse();
+        return false;
+    }
+    if (s_card && s_card_night) {    // night-mode card -> schedule card
+        s_wake_left = 0;             // night mode just turned on there: don't keep the panel awake
+        s_card_night = false;
+        s_card_sched = true;
+        s_sv_n = sched_list(s_sv_list);
+        render_message();
+        return true;
+    }
+    if (s_card) {                    // setup card -> night-mode card
+        s_card_night = true;
+        render_message();
+        return true;
     }
     s_browse_left = BROWSE_S;
     if (s_idx + 1 < s_n) {
@@ -1398,6 +1798,12 @@ ui_hold_t ui_hold_action(void)
         return UI_HOLD_NONE;
     }
     if (s_card) {
+        if (s_sv) {
+            return s_sv_n ? UI_HOLD_ZONES : UI_HOLD_NONE;
+        }
+        if (s_card_sched) {
+            return s_sv_n ? UI_HOLD_SCHED_OPEN : UI_HOLD_NONE;
+        }
         return s_card_night ? UI_HOLD_NIGHT : UI_HOLD_LAN_SETUP;
     }
     return s_idx >= 0 && s_idx < s_n ? UI_HOLD_DELETE : UI_HOLD_NONE;
@@ -1636,6 +2042,90 @@ void ui_night_toggle(void)
     s_browse_left = 1;      // ...then back to normal, and the night clock comes up right away if it's on
 }
 
+// ---------- schedule browser ----------
+
+void ui_sched_open(void)
+{
+    s_sv_n = sched_list(s_sv_list);
+    if (!s_sv_n || !s_card_sched) {
+        return;
+    }
+    s_card_sched = false;
+    s_sv = true;
+    s_sv_idx = 0;
+    s_browse_left = BROWSE_S;
+    render_message();
+}
+
+static int zone_of(int held_ms)
+{
+    return held_ms < ZONE_TODAY ? 0 : held_ms < ZONE_ALL ? 1 : held_ms < ZONE_NONE2 ? 2 : 3;
+}
+
+void ui_zone_progress(int held_ms)
+{
+    if (!s_sv || !s_zone) {
+        return;
+    }
+    s_browse_left = BROWSE_S;
+    static const uint32_t COL[] = {0xbac4d6, 0xff9800, 0xff4d4f, 0xbac4d6};
+    const char *txt[] = {T->sv_z_none, T->sv_z_today, T->sv_z_all, T->sv_z_none};
+    int z = zone_of(held_ms);
+    int zw = lv_obj_get_width(s_zone);
+    int x = (LV_MIN(held_ms, ZONE_END) - ZONE_START) * zw / (ZONE_END - ZONE_START);
+    lv_obj_set_x(s_zone_mark, LV_MAX(0, LV_MIN(x, zw - 4)));
+    lv_obj_add_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_sv_info, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_zone, LV_OBJ_FLAG_HIDDEN);
+    if (strcmp(lv_label_get_text(s_zone_lbl), txt[z]) != 0) {
+        lv_label_set_text(s_zone_lbl, txt[z]);
+    }
+    lv_obj_set_style_text_color(s_zone_lbl, lv_color_hex(COL[z]), 0);
+    lv_obj_align(s_zone_lbl, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_remove_flag(s_zone_lbl, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void sv_done_cb(lv_timer_t *t)
+{
+    s_deleting = false;
+    lv_obj_add_flag(s_del_done, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_del_txt, T->msg_deleted);
+    s_sv_n = sched_list(s_sv_list);
+    if (s_sv_n == 0) {
+        exit_browse();
+    } else {
+        s_browse_left = BROWSE_S;
+        render_message();
+    }
+}
+
+void ui_zone_release(int held_ms)
+{
+    if (!s_sv || !s_zone) {
+        return;
+    }
+    lv_obj_add_flag(s_zone, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_zone_lbl, LV_OBJ_FLAG_HIDDEN);
+    int z = zone_of(held_ms);
+    if ((z != 1 && z != 2) || s_sv_idx >= s_sv_n) {
+        render_message();   // nothing: back to the schedule as it was
+        return;
+    }
+    uint32_t id = s_sv_list[s_sv_idx].id;
+    bool ok = z == 1 ? sched_skip_today(id) : sched_delete_id(id);
+    if (!ok) {
+        render_message();
+        return;
+    }
+    lv_label_set_text(s_del_txt, z == 1 ? T->sv_done_today : T->sv_done_all);
+    s_deleting = true;
+    lv_obj_add_flag(s_msg_hint, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_del_done, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_fade_in(s_del_done, 200, 0);
+    lv_timer_t *t = lv_timer_create(sv_done_cb, DELETED_MS, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
 bool ui_night_active(void)
 {
     return s_night;
@@ -1790,6 +2280,7 @@ static void build(void)
     s_city_time = NULL;
     s_city_ampm = NULL;
     s_wx_panel = NULL;
+    s_cmp_panel = NULL;
     s_night_panel = NULL;
     s_night_time = s_night_min = s_night_date = NULL;
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
@@ -1836,7 +2327,7 @@ static void build(void)
     lv_obj_t *now = card(scr, 6, 92, col_w - 12, now_h);
     // city, temperature and an animated icon instead of the weather's name
     lv_obj_t *city = label(now, &font_pt_14, COLOR_MUTED);
-    one_line(city, col_w - 28);
+    scroll_line(city, col_w - 28);   // long names roll instead of being cut
     label_fmt(city, LV_SYMBOL_GPS " %s", g_cfg.city);
     s_temp = label(now, &font_pt_28, lv_color_white());
     lv_label_set_text(s_temp, "--.-" DEG);
@@ -1863,6 +2354,7 @@ static void build(void)
     build_sensor_panel(w, h);
     build_city_panel(w, h);
     build_wx_panel(w, h);
+    build_cmp_panel(w, h);
     build_night_panel(w, h);
     s_lan_panel = NULL;   // lv_layer_top was cleaned above
     s_lan_msg = NULL;
@@ -1881,6 +2373,7 @@ void ui_init(bool config_mode)
     s_city_s = config_get_u8_def("t_city", CYCLE_DEFAULT_S);
     s_wx_s = config_get_u8_def("t_wx", CYCLE_DEFAULT_S);
     s_wx_on = config_get_u8_def("wx_on", 1);
+    govee_cmp_load(s_cmps);
     s_night_on = config_get_u8("night_on");
     s_night_from = config_get_u8_def("night_from", NIGHT_DEFAULT_FROM) % 24;
     s_night_to = config_get_u8_def("night_to", NIGHT_DEFAULT_TO) % 24;
@@ -1950,6 +2443,7 @@ void ui_set_fahrenheit(bool on)
     render_sensors();
     render_city();
     render_wx();
+    render_cmp();
 }
 
 // ---------- setup page on the home network ----------
