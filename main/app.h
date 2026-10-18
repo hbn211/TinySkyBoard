@@ -140,6 +140,8 @@ void telegram_notify(const char *text);   // alert to the owner, sent by the bot
 // A reminder with SCHED_F_TG_DONE started (closed = false: send it with a "Done" button), or that
 // occurrence left the screen from the panel (closed = true: the Telegram button says so)
 void telegram_reminder(uint32_t id, int64_t occ, bool closed);
+// keeps only what the panel can draw (fonts + color emoji); returns how many characters were dropped
+int text_sanitize(const char *in, char *out, size_t size);
 tg_state_t telegram_state(void);
 
 // govee.c — Govee thermometers (cloud OpenAPI)

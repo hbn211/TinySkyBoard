@@ -47,6 +47,8 @@ the setup page and in the bot's `/status` reply.
   time, duration and repeat (once, every day, Mon–Fri, weekends). Optionally the reminder also
   arrives in Telegram when it starts, with a **✅ Done** button that clears it from the screen
   (handy for "take the medicine"); deleting it on the panel updates that button too.
+  They can also be created, edited and deleted on a **Scheduled messages** page, linked from the
+  setup page when it's opened over your home network.
 - **Uptime notices**: the bot tells you when the panel powers on (and why — e.g. a power cut,
   with how long it was off) and when the internet comes back after an outage. `/status` answers
   whether it's alive, and lists the Govee sensors.

@@ -630,6 +630,34 @@ bool sched_add(const sched_t *s)
     return ok;
 }
 
+bool sched_update(uint32_t id, const sched_t *s)
+{
+    bool ok = false;
+    time_t now = time(NULL), occ;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX && !ok; i++) {
+        if (id && s_sched[i].id == id) {
+            if (sched_is_active(&s_sched[i], now, &occ)) {
+                telegram_reminder(id, occ, true);   // the old occurrence leaves the screen
+            }
+            s_sched[i] = *s;
+            s_sched[i].id = id;
+            s_announced[i] = 0;
+            s_dismissed[i] = 0;
+            s_unread_sched[i] = false;
+            save_sched();
+            save_sched_state();
+            s_events |= MSG_EV_CHANGED;
+            update_led();
+            ESP_LOGI(TAG, "schedule %" PRIu32 " changed: %s", id, s->text);
+            ok = true;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    xTaskNotifyGive(s_task);
+    return ok;
+}
+
 bool sched_remove(int index)
 {
     bool ok = false;

@@ -105,6 +105,9 @@ typedef struct {
 
     // setup page
     const char *p_title;
+    const char *p_sched_link, *p_sched_title, *p_sched_new, *p_sched_text, *p_sched_dur, *p_sched_tg;
+    const char *p_sched_save, *p_sched_add, *p_sched_del, *p_sched_del_q, *p_sched_saved, *p_sched_deleted;
+    const char *p_sched_long;
     const char *p_sec[5];           // setup page sections: place, display, brightness, rotation, integrations
     const char *p_network;
     const char *p_network_hint;

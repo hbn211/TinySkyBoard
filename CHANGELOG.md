@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Scheduled messages page**: create, edit and delete scheduled messages from the browser (text,
+  repeat, date and time, duration, ✅ Done in Telegram). Linked from the setup page when it's opened
+  over the home network; using it keeps that page open.
+
 ## 1.3.0 — 2026-10-18
 
 - **Weather details page** after the dashboard, with widget-like tiles: feels-like (with the actual

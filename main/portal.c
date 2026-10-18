@@ -2,11 +2,14 @@
 #include "config.h"
 #include "i18n.h"
 #include "board.h"
+#include "schedule.h"
 
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <strings.h>
+#include <inttypes.h>
+#include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_wifi.h"
@@ -23,6 +26,7 @@ const char *portal_help_html(uint8_t lang);   // portal_help.c
 
 #define PORTAL_TIMEOUT_MS   (15 * 60 * 1000)   // nothing saved: restart and try the Wi-Fi again
 #define MAX_NETS            20
+#define CLEAN_TEXT_MAX      1024   // a scheduled text from the page, before cleaning
 
 static const char *TAG = "portal";
 
@@ -61,6 +65,7 @@ static esp_err_t out(httpd_req_t *req, const char *str)
 static char s_nets[MAX_NETS][33];
 static httpd_handle_t s_server;
 static esp_timer_handle_t s_lan_timer;   // home-network setup closes by itself
+static bool s_captive;   // own Wi-Fi (setup mode): no /agenda (no clock, no message store)
 static int s_n_nets;
 
 // ---------- DNS: answers 192.168.4.1 for any name (captive portal) ----------
@@ -167,6 +172,14 @@ static const char PAGE_HEAD[] =
     "border-radius:14px;background:#0f1524}h2{margin-top:14px}"
     "form button{column-span:all;display:block;max-width:420px;margin:4px auto 0}}"
     "nav .h{margin-right:auto;border:1px solid #263049;border-radius:8px;padding:4px 10px;color:#e8ecf4}"
+    "textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #263049;"
+    "background:#161d2e;color:#fff;font:inherit;resize:vertical}"
+    "form.sc{margin:14px 0;padding:12px;border:1px solid #263049;border-radius:12px;background:#0f1524}"
+    "form.sc h2{margin:0 0 10px}form.sc .hrs{margin-top:8px}form.sc .hrs span{white-space:nowrap}"
+    ".btns{display:flex;gap:8px}.btns button{margin-top:12px}button.del{background:#3a1d27;color:#ff8a80}"
+    ".st{display:inline-block;margin-bottom:8px;font-size:.8em;color:#4fc3f7}"
+    ".ok{color:#81c784}.err{color:#ff8a80}a.ag{display:block;margin-top:14px;padding:12px;border:1px solid #263049;"
+    "border-radius:10px;color:#4fc3f7;text-decoration:none;text-align:center}"
     "</style></head><body>";
 
 // ?lang=xx only changes the page language; what counts is what gets saved in the form
@@ -185,19 +198,20 @@ static uint8_t page_lang(httpd_req_t *req)
     return lang;
 }
 
-// Page header + bar with the help/back link and the languages
-static void send_head(httpd_req_t *req, uint8_t lang, bool help)
+// Page header + bar with the help/back link and the languages; self = this page's path
+static void send_head(httpd_req_t *req, uint8_t lang, const char *self)
 {
     const i18n_t *L = i18n_get(lang);
+    bool setup = strcmp(self, "/") == 0;
     char link[96];
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     out(req, PAGE_HEAD);
-    snprintf(link, sizeof(link), "<nav><a class=h href='%s?lang=%s'>%s %s</a>", help ? "/" : "/ajuda",
-             L->code, help ? "&larr;" : "?", help ? L->p_back_link : L->p_help_link);
+    snprintf(link, sizeof(link), "<nav><a class=h href='%s?lang=%s'>%s %s</a>", setup ? "/ajuda" : "/",
+             L->code, setup ? "?" : "&larr;", setup ? L->p_help_link : L->p_back_link);
     out(req, link);
     for (uint8_t i = 0; i < LANG_COUNT; i++) {
         snprintf(link, sizeof(link), "<a class='l%s' href='%s?lang=%s'>%s</a>", i == lang ? " on" : "",
-                 help ? "/ajuda" : "/", i18n_get(i)->code, i18n_get(i)->code);
+                 self, i18n_get(i)->code, i18n_get(i)->code);
         out(req, link);
     }
     out(req, "</nav>");
@@ -575,7 +589,7 @@ static esp_err_t preview_get(httpd_req_t *req)
 static esp_err_t help_get(httpd_req_t *req)
 {
     uint8_t lang = page_lang(req);
-    send_head(req, lang, true);
+    send_head(req, lang, "/ajuda");
     out(req, portal_help_html(lang));
     out(req, "</body></html>");
     return out(req, NULL);
@@ -593,10 +607,18 @@ static esp_err_t root_get(httpd_req_t *req)
 {
     uint8_t lang = page_lang(req);
     const i18n_t *L = i18n_get(lang);
-    send_head(req, lang, false);
+    send_head(req, lang, "/");
     out(req, "<h1>");
     out(req, L->p_title);
-    out(req, "</h1><form method=post action=/save>");
+    out(req, "</h1>");
+    if (!s_captive) {
+        char link[48];
+        snprintf(link, sizeof(link), "<a class=ag href='/agenda?lang=%s'>", L->code);
+        out(req, link);
+        out(req, L->p_sched_link);
+        out(req, " &rarr;</a>");
+    }
+    out(req, "<form method=post action=/save>");
     section(req, L, 0);
     out(req, "<label>");
     out(req, L->p_network);
@@ -882,6 +904,255 @@ static esp_err_t save_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+// ---------- /agenda: scheduled messages (home-network setup only: needs the clock and the message store) ----------
+
+static const int DURS[] = {15, 30, 60, 120, 240, 480, 1440};
+
+static void dur_label(int min, char *out, size_t size)
+{
+    if (min % 1440 == 0) {
+        snprintf(out, size, "%d d", min / 1440);
+    } else if (min % 60 == 0) {
+        snprintf(out, size, "%d h", min / 60);
+    } else if (min > 60) {
+        snprintf(out, size, "%dh%02d", min / 60, min % 60);
+    } else {
+        snprintf(out, size, "%d min", min);
+    }
+}
+
+// one card: an existing schedule (s->id) or the empty "new" one
+static void send_sched_form(httpd_req_t *req, const i18n_t *L, const sched_t *s)
+{
+    char html[160];
+    snprintf(html, sizeof(html), "<form method=post action=/agenda class=sc><input type=hidden name=id value=%" PRIu32
+             "><input type=hidden name=lang value=%s>", s->id, L->code);
+    out(req, html);
+    if (s->id) {
+        int st = sched_state(s->id);
+        const char *tag = st == SCHED_ON_SCREEN ? L->sch_on_now : st == SCHED_DISMISSED ? L->sch_dismissed :
+                          st == SCHED_SKIPPED ? L->sch_skipped : NULL;
+        if (tag) {
+            out(req, "<span class=st>");
+            out(req, tag);
+            out(req, "</span>");
+        }
+    } else {
+        out(req, "<h2>");
+        out(req, L->p_sched_new);
+        out(req, "</h2>");
+    }
+    out(req, "<textarea name=text rows=2 maxlength=119 required placeholder=\"");
+    out(req, L->p_sched_text);
+    out(req, "\">");
+    send_escaped(req, s->text);
+    out(req, "</textarea><div class=hrs><select name=rep onchange=rp(this)>");
+    for (int r = 0; r < 4; r++) {
+        snprintf(html, sizeof(html), "<option value=%d%s>%s", r, r == s->repeat ? " selected" : "", L->repeat[r]);
+        out(req, html);
+    }
+    // date of a one-time message (the start; repeats only use the time)
+    time_t start = s->repeat == REPEAT_ONCE && s->start ? (time_t)s->start : time(NULL);
+    struct tm t;
+    localtime_r(&start, &t);
+    int hour = s->repeat == REPEAT_ONCE && s->start ? t.tm_hour : s->hour, min = s->repeat == REPEAT_ONCE && s->start ? t.tm_min : s->minute;
+    snprintf(html, sizeof(html), "</select><input type=date name=date value=%04d-%02d-%02d%s><input type=time name=time value=%02d:%02d required>",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, s->repeat == REPEAT_ONCE ? "" : " hidden", hour, min);
+    out(req, html);
+    out(req, "</div><div class=hrs><span>");
+    out(req, L->p_sched_dur);
+    out(req, "</span><select name=dur>");
+    bool listed = false;
+    for (int i = 0; i < (int)(sizeof(DURS) / sizeof(DURS[0])); i++) {
+        listed |= DURS[i] == s->dur_min;
+    }
+    for (int i = -1; i < (int)(sizeof(DURS) / sizeof(DURS[0])); i++) {
+        int d = i < 0 ? s->dur_min : DURS[i];
+        if (i < 0 && listed) {
+            continue;   // the current value goes first only when it isn't one of the usual ones
+        }
+        char lbl[16];
+        dur_label(d, lbl, sizeof(lbl));
+        snprintf(html, sizeof(html), "<option value=%d%s>%s", d, d == s->dur_min ? " selected" : "", lbl);
+        out(req, html);
+    }
+    out(req, "</select></div>");
+    if (g_cfg.tg_token[0]) {
+        out(req, s->flags & SCHED_F_TG_DONE ? "<label class=chk><input type=checkbox name=tg value=1 checked> "
+                                            : "<label class=chk><input type=checkbox name=tg value=1> ");
+        out(req, L->p_sched_tg);
+        out(req, "</label>");
+    }
+    out(req, "<div class=btns><button name=act value=save>");
+    out(req, s->id ? L->p_sched_save : L->p_sched_add);
+    out(req, "</button>");
+    if (s->id) {
+        out(req, "<button name=act value=del class=del onclick=\"return confirm(this.dataset.q)\" data-q=\"");
+        out(req, L->p_sched_del_q);
+        out(req, "\">");
+        out(req, L->p_sched_del);
+        out(req, "</button>");
+    }
+    out(req, "</div></form>");
+}
+
+static void lan_touch(void)
+{
+    if (s_lan_timer) {   // still being used: the home-network setup stays open
+        esp_timer_restart(s_lan_timer, (uint64_t)PORTAL_LAN_TIMEOUT_MS * 1000);
+    }
+}
+
+static esp_err_t agenda_get(httpd_req_t *req)
+{
+    lan_touch();
+    uint8_t lang = page_lang(req);
+    const i18n_t *L = i18n_get(lang);
+    send_head(req, lang, "/agenda");
+    out(req, "<h1>");
+    out(req, L->p_sched_title);
+    out(req, "</h1>");
+    char query[32], m[4];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "m", m, sizeof(m)) == ESP_OK) {
+        out(req, "<p class=ok>");
+        out(req, m[0] == 'd' ? L->p_sched_deleted : L->p_sched_saved);
+        out(req, "</p>");
+    }
+    static sched_t list[SCHED_MAX];
+    int n = sched_list(list);
+    if (n == 0) {
+        out(req, "<small>");
+        out(req, L->sch_empty);
+        out(req, "</small>");
+    }
+    for (int i = 0; i < n; i++) {
+        send_sched_form(req, L, &list[i]);
+    }
+    if (n < SCHED_MAX) {
+        sched_t blank = {.repeat = REPEAT_ONCE, .dur_min = 60};
+        time_t soon = time(NULL) + 5 * 60;
+        blank.start = soon - soon % 300;   // next 5 minutes
+        send_sched_form(req, L, &blank);
+    } else {
+        out(req, "<small>");
+        out(req, L->sch_full);
+        out(req, "</small>");
+    }
+    out(req, "<script>function rp(s){s.form.date.hidden=s.value!='0'}</script></body></html>");
+    return out(req, NULL);
+}
+
+// error page: the browser's back button keeps what was typed
+static esp_err_t agenda_error(httpd_req_t *req, const i18n_t *L, const char *msg)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    out(req, PAGE_HEAD);
+    out(req, "<p class=err>");
+    out(req, msg);
+    out(req, "</p><button onclick=history.back()>&larr; ");
+    out(req, L->p_back_link);
+    out(req, "</button></body></html>");
+    return out(req, NULL);
+}
+
+static esp_err_t agenda_post(httpd_req_t *req)
+{
+    lan_touch();
+    static char body[1536];
+    int len = req->content_len < sizeof(body) - 1 ? req->content_len : sizeof(body) - 1;
+    int got = 0;
+    while (got < len) {
+        int r = httpd_req_recv(req, body + got, len - got);
+        if (r <= 0) {
+            return ESP_FAIL;
+        }
+        got += r;
+    }
+    body[got] = '\0';
+    char num[12], act[8], date[12], hm[8];
+    form_value(body, "lang", num, sizeof(num));
+    const i18n_t *L = T;
+    for (uint8_t i = 0; i < LANG_COUNT; i++) {
+        if (strcmp(num, i18n_get(i)->code) == 0) {
+            L = i18n_get(i);
+        }
+    }
+    form_value(body, "id", num, sizeof(num));
+    uint32_t id = strtoul(num, NULL, 10);
+    form_value(body, "act", act, sizeof(act));
+
+    char loc[40];
+    snprintf(loc, sizeof(loc), "/agenda?lang=%s&m=%c", L->code, strcmp(act, "del") == 0 ? 'd' : 's');
+    if (strcmp(act, "del") == 0) {
+        sched_delete_id(id);
+    } else {
+        static char text[CLEAN_TEXT_MAX], clean[CLEAN_TEXT_MAX];
+        form_value(body, "text", text, sizeof(text));
+        for (char *p = text; *p; p++) {
+            if (*p == '\r') {
+                *p = ' ';   // textarea line breaks come as CR LF
+            }
+        }
+        text_sanitize(text, clean, sizeof(clean));
+        int max_chars = 0;
+        bool fits = clean[0] && strlen(clean) < SCHED_TEXT;
+        if (fits) {
+            lvgl_port_lock(0);
+            fits = ui_text_fits(clean, &max_chars);
+            lvgl_port_unlock();
+        }
+        if (!clean[0]) {
+            return agenda_error(req, L, L->tg_no_glyphs);
+        }
+        if (!fits) {
+            return agenda_error(req, L, L->p_sched_long);
+        }
+        sched_t s = {0};
+        strlcpy(s.text, clean, sizeof(s.text));
+        form_value(body, "rep", num, sizeof(num));
+        s.repeat = atoi(num) % 4;
+        form_value(body, "dur", num, sizeof(num));
+        int dur = atoi(num);
+        s.dur_min = dur < 1 ? 60 : dur > 7 * 1440 ? 7 * 1440 : dur;
+        if (s.repeat != REPEAT_ONCE && s.dur_min > 1440) {
+            s.dur_min = 1440;   // a daily repeat lasts at most one day
+        }
+        form_value(body, "tg", num, sizeof(num));
+        s.flags = num[0] == '1' ? SCHED_F_TG_DONE : 0;
+        form_value(body, "time", hm, sizeof(hm));
+        int t = parse_hhmm(hm);
+        if (t < 0) {
+            return agenda_error(req, L, L->sch_bad_when);
+        }
+        s.hour = t / 60;
+        s.minute = t % 60;
+        if (s.repeat == REPEAT_ONCE) {
+            struct tm tm = {0};
+            form_value(body, "date", date, sizeof(date));
+            if (sscanf(date, "%d-%d-%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday) != 3) {
+                return agenda_error(req, L, L->sch_bad_when);
+            }
+            tm.tm_year -= 1900;
+            tm.tm_mon -= 1;
+            tm.tm_hour = s.hour;
+            tm.tm_min = s.minute;
+            tm.tm_isdst = -1;
+            s.start = mktime(&tm);
+            if (s.start + s.dur_min * 60 <= time(NULL)) {
+                return agenda_error(req, L, L->sch_past);   // would already be over
+            }
+        }
+        bool ok = id ? sched_update(id, &s) : sched_add(&s);
+        if (!ok) {
+            return agenda_error(req, L, id ? L->sch_bad_when : L->sch_full);
+        }
+    }
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", loc);
+    return httpd_resp_send(req, NULL, 0);
+}
+
 // Any other URL (Android/iOS/Windows connectivity checks) goes to the page
 static esp_err_t redirect_get(httpd_req_t *req)
 {
@@ -912,8 +1183,14 @@ static bool http_start(bool captive)
     httpd_register_uri_handler(server, &save);
     httpd_register_uri_handler(server, &help);
     httpd_register_uri_handler(server, &preview);
+    s_captive = captive;
     if (captive) {
         httpd_register_uri_handler(server, &other);
+    } else {
+        const httpd_uri_t agenda = {.uri = "/agenda", .method = HTTP_GET, .handler = agenda_get};
+        const httpd_uri_t agenda_save = {.uri = "/agenda", .method = HTTP_POST, .handler = agenda_post};
+        httpd_register_uri_handler(server, &agenda);
+        httpd_register_uri_handler(server, &agenda_save);
     }
     return true;
 }

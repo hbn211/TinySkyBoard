@@ -119,7 +119,7 @@ static void set_commands(void)
 // emoji in main/emoji). Returns how many characters were dropped. Variation selectors and skin tones
 // are left out without counting (the emoji shows in its default look); in combined emoji
 // (joined with ZWJ) only the first one stays.
-static int sanitize(const char *in, char *out, size_t size)
+int text_sanitize(const char *in, char *out, size_t size)
 {
     const unsigned char *p = (const unsigned char *)in;
     size_t o = 0;
@@ -574,7 +574,7 @@ static void send_status(int64_t chat_id)
 static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t out_size)
 {
     static char clean[CLEAN_MAX];
-    int dropped = sanitize(text, clean, sizeof(clean));
+    int dropped = text_sanitize(text, clean, sizeof(clean));
     if (!clean[0]) {
         reply(chat_id, T->tg_no_glyphs);
         return false;
