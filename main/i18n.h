@@ -172,6 +172,14 @@ typedef struct {
     const char *tg_welcome;
     const char *tg_help;
     const char *tg_private;
+    const char *tg_help_owner;          // appended to the help for the owner
+    const char *tg_owner_only;
+    const char *tg_invite_fmt;          // %s = t.me link, %u = code
+    const char *tg_members_full, *tg_members_none, *tg_members_title;
+    const char *tg_member_remove_fmt;   // button: %s = name
+    const char *tg_member_removed_fmt, *tg_member_joined_fmt;   // to the owner, %s = name
+    const char *tg_member_gone;         // answer to the remove button
+    const char *tg_member_welcome, *tg_you_removed;   // to the member
     const char *tg_only_text;
     const char *tg_cleared;
     const char *tg_no_glyphs;

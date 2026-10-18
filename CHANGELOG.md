@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **More people on the bot**: `/invite` gives a link (and a code) valid for 10 minutes for someone at
+  home; up to 4 people can send messages and schedules. `/members` lists and removes them. With
+  more than one person, the panel and `/messages` show who sent each message; a ✅ Done reminder
+  goes to whoever scheduled it. Alerts, `/rain`, `/invite` and `/members` stay with the owner, and
+  the `/` menu shows those only in the owner's chat.
 - **Scheduled messages page**: create, edit and delete scheduled messages from the browser (text,
   repeat, date and time, duration, ✅ Done in Telegram). Linked from the setup page when it's opened
   over the home network; using it keeps that page open.

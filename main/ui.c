@@ -699,13 +699,15 @@ static void render_message(void)
         time_t now = time(NULL);
         localtime_r(&m->when, &t);
         localtime_r(&now, &today);
-        char hm[12];
+        char hm[12], when[48];
         clock_fmt(hm, sizeof(hm), t.tm_hour, t.tm_min);
         if (t.tm_yday == today.tm_yday && t.tm_year == today.tm_year) {
-            label_fmt(s_msg_when, T->msg_today_fmt, hm);
+            snprintf(when, sizeof(when), T->msg_today_fmt, hm);
         } else {
-            label_fmt(s_msg_when, "%02d/%02d %s", t.tm_mday, t.tm_mon + 1, hm);
+            snprintf(when, sizeof(when), "%02d/%02d %s", t.tm_mday, t.tm_mon + 1, hm);
         }
+        // with more than one person on the bot: "Ana · today 14:05"
+        label_fmt(s_msg_when, "%s%s%s", m->from, m->from[0] ? " \xC2\xB7 " : "", when);
     } else {
         lv_label_set_text(s_msg_when, "");
     }

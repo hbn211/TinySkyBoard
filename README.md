@@ -247,6 +247,11 @@ the key from the `GOVEE_API_KEY` environment variable).
 2. Paste the token on the setup page.
 3. Send any message to your bot. **The first chat to talk to it becomes the owner**; everyone
    else gets "this panel is private".
+4. Optional: `/invite` gives you a link (and a code) valid for 10 minutes; forward it to someone at
+   home, they tap it and **Start**, and they can send messages and schedules too (up to 4 people).
+   `/members` lists them with a button to remove each one. With more than one person, the panel
+   shows who sent each message. Alerts, the power-on notice, `/rain`, `/invite` and `/members`
+   stay with the owner; a ✅ Done reminder goes to whoever scheduled it.
 
 Commands work in any of the three languages; the bot's `/` menu shows them in the panel's
 language.
@@ -258,7 +263,9 @@ language.
 | `/list` | `/agenda` | `/lista` | List what is scheduled |
 | `/cancel N` | `/cancelar N` | `/cancelar N` | Delete schedule N |
 | `/messages` | `/mensagens` | `/mensajes` | Messages on the screen and whether they were read |
-| `/rain` | `/chuva` | `/lluvia` | Rain alert on/off (also `/rain on`, `/rain off`) |
+| `/rain` | `/chuva` | `/lluvia` | Rain alert on/off (also `/rain on`, `/rain off`) — owner |
+| `/invite` | `/convidar` | `/invitar` | Link/code for someone else to use the panel — owner |
+| `/members` | `/membros` | `/miembros` | Who else uses the panel, with remove buttons — owner |
 | `/clear` | `/limpar` | `/borrar` | Delete the sent messages (scheduled ones stay) |
 | `/status`, `/ping` | `/status` | `/estado` | Is it on? Uptime, Wi-Fi, weather, Govee sensors |
 | `/help` | `/ajuda` | `/ayuda` | List the commands |
@@ -323,7 +330,7 @@ set are dropped and the bot says so; skin tones show in the default tone, and in
 ## Known limitations
 
 - Only the emoji in `tools/emoji_list.txt` show; flags and combined emoji don't.
-- One owner per bot.
+- One owner per bot, plus up to 4 invited people.
 - Govee low/high and trend start over when the panel restarts (the API has no history).
 - If a Govee sensor reports exactly the same temperature and humidity for 3 uploads in a row, it
   leaves the screen until the next change.

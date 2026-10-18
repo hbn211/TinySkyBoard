@@ -9,6 +9,7 @@
 #define MSG_DIRECT_MAX  5       // direct messages taking turns; the oldest is dropped
 #define MSG_TEXT        240
 #define MSG_ITEMS_MAX   (MSG_DIRECT_MAX + SCHED_MAX)
+#define MSG_FROM        24      // sender's first name (only shown when the bot has more than one person)
 
 typedef enum {
     REPEAT_ONCE = 0,
@@ -20,6 +21,7 @@ typedef enum {
 typedef struct {
     uint32_t id;            // 0 = free slot
     char text[SCHED_TEXT];
+    uint8_t who;            // who created it: 0 = the owner, n = bot member n (padding byte before)
     int64_t start;          // REPEAT_ONCE: start (epoch)
     uint8_t hour, minute;   // repeats: local time of day
     uint8_t repeat;         // repeat_t
@@ -35,6 +37,7 @@ typedef struct {
     bool scheduled;
     bool unread;            // not opened with the button yet
     time_t when;            // arrival (direct) or start of this occurrence (scheduled)
+    char from[MSG_FROM];    // sender's name; empty = don't show
     char text[MSG_TEXT];
 } msg_item_t;
 
@@ -43,7 +46,7 @@ typedef struct {
 
 void msg_init(void);
 
-int msg_add_direct(const char *text);    // returns how many direct messages are active
+int msg_add_direct(const char *text, const char *from);   // returns how many direct messages are active
 int msg_active(msg_item_t *out, int max);   // newest first
 bool msg_delete(uint32_t key);           // repeating schedule: only hides the current occurrence
 void msg_clear_all(void);                // /clear: removes the direct messages (schedules stay)
@@ -62,3 +65,4 @@ bool sched_skip_today(uint32_t id);      // skip the current (or next) occurrenc
 bool sched_delete_id(uint32_t id);       // delete the whole schedule
 bool sched_done(uint32_t id, time_t occ); // "Done" in Telegram: hides that occurrence if it is still on
 bool sched_get(uint32_t id, sched_t *out);
+void sched_forget_who(uint8_t who);      // a bot member left: their schedules now belong to the owner

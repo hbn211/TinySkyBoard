@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "esp_app_desc.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -74,22 +75,25 @@ static void reply(int64_t chat_id, const char *text)
 // Telegram "/" menu with the commands in the panel's language
 static void set_commands(void)
 {
-    static const char *const CMDS[LANG_COUNT][8][2] = {
+    static const char *const CMDS[LANG_COUNT][10][2] = {
         [LANG_PT] = {{"mensagens", "Mensagens na tela e se foram lidas"},
-                     {"chuva", "Ligar/desligar o aviso de chuva"},
                      {"agendar", "Programar uma mensagem"}, {"agenda", "Ver o que está agendado"},
                      {"cancelar", "Apagar um agendamento: /cancelar N"}, {"limpar", "Apagar as mensagens enviadas (não as agendadas)"},
-                     {"status", "Ver se o painel está ligado"}, {"ajuda", "Ajuda"}},
+                     {"status", "Ver se o painel está ligado"}, {"ajuda", "Ajuda"},
+                     {"chuva", "Ligar/desligar o aviso de chuva"}, {"convidar", "Código para outra pessoa usar o painel"},
+                     {"membros", "Quem mais usa o painel (e remover)"}},
         [LANG_EN] = {{"messages", "Messages on the panel and whether they were read"},
-                     {"rain", "Turn the rain alert on/off"},
                      {"schedule", "Schedule a message"}, {"list", "See what is scheduled"},
                      {"cancel", "Delete a schedule: /cancel N"}, {"clear", "Delete the sent messages (not the scheduled ones)"},
-                     {"status", "Check that the panel is on"}, {"help", "Help"}},
+                     {"status", "Check that the panel is on"}, {"help", "Help"},
+                     {"rain", "Turn the rain alert on/off"}, {"invite", "A code for someone else to use the panel"},
+                     {"members", "Who else uses the panel (and remove)"}},
         [LANG_ES] = {{"mensajes", "Mensajes en el panel y si se leyeron"},
-                     {"lluvia", "Activar/desactivar el aviso de lluvia"},
                      {"programar", "Programar un mensaje"}, {"lista", "Ver lo programado"},
                      {"cancelar", "Borrar una programación: /cancelar N"}, {"borrar", "Borrar los mensajes enviados (no los programados)"},
-                     {"estado", "Ver si el panel está encendido"}, {"ayuda", "Ayuda"}},
+                     {"estado", "Ver si el panel está encendido"}, {"ayuda", "Ayuda"},
+                     {"lluvia", "Activar/desactivar el aviso de lluvia"}, {"invitar", "Un código para que otra persona use el panel"},
+                     {"miembros", "Quién más usa el panel (y quitar)"}},
     };
     int lang = 0;
     for (int i = 0; i < LANG_COUNT; i++) {
@@ -97,20 +101,31 @@ static void set_commands(void)
             lang = i;
         }
     }
-    cJSON *body = cJSON_CreateObject();
-    cJSON *list = cJSON_AddArrayToObject(body, "commands");
-    for (int i = 0; i < 8; i++) {
-        cJSON *c = cJSON_CreateObject();
-        cJSON_AddStringToObject(c, "command", CMDS[lang][i][0]);
-        cJSON_AddStringToObject(c, "description", CMDS[lang][i][1]);
-        cJSON_AddItemToArray(list, c);
+    // everyone: the first 7; the owner's chat: all 10
+    for (int scope = 0; scope < 2; scope++) {
+        if (scope == 1 && !g_cfg.tg_owner) {
+            break;
+        }
+        cJSON *body = cJSON_CreateObject();
+        cJSON *list = cJSON_AddArrayToObject(body, "commands");
+        for (int i = 0; i < (scope ? 10 : 7); i++) {
+            cJSON *c = cJSON_CreateObject();
+            cJSON_AddStringToObject(c, "command", CMDS[lang][i][0]);
+            cJSON_AddStringToObject(c, "description", CMDS[lang][i][1]);
+            cJSON_AddItemToArray(list, c);
+        }
+        if (scope) {
+            cJSON *sc = cJSON_AddObjectToObject(body, "scope");
+            cJSON_AddStringToObject(sc, "type", "chat");
+            cJSON_AddNumberToObject(sc, "chat_id", (double)g_cfg.tg_owner);
+        }
+        char *json = cJSON_PrintUnformatted(body);
+        cJSON_Delete(body);
+        char url[160];
+        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/setMyCommands", g_cfg.tg_token);
+        cJSON_Delete(net_http_json(url, json, 10000));
+        free(json);
     }
-    char *json = cJSON_PrintUnformatted(body);
-    cJSON_Delete(body);
-    char url[160];
-    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/setMyCommands", g_cfg.tg_token);
-    cJSON_Delete(net_http_json(url, json, 10000));
-    free(json);
 }
 
 // ---------- text ----------
@@ -605,6 +620,185 @@ static bool prepare_text(int64_t chat_id, const char *text, char *out, size_t ou
     return true;
 }
 
+// ---------- other people (members) ----------
+// The owner invites with a one-time code; members send messages and use the assistant. Alerts, the
+// power-on notice and the owner-only commands stay with the owner.
+
+#define MEMBERS_MAX     4
+#define INVITE_S        (10 * 60)
+
+typedef struct {
+    int64_t chat;           // 0 = free slot
+    char name[MSG_FROM];
+} member_t;
+
+static member_t s_members[MEMBERS_MAX];
+static char s_bot_user[48];          // the bot's @username, for the invite link (getMe)
+static uint32_t s_invite;            // current code; 0 = none
+static int64_t s_invite_until;       // uptime (s)
+
+static void members_save(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("painel", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, "tg_members", s_members, sizeof(s_members));
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+static void members_load(void)
+{
+    nvs_handle_t nvs;
+    size_t len = sizeof(s_members);
+    if (nvs_open("painel", NVS_READONLY, &nvs) == ESP_OK) {
+        if (nvs_get_blob(nvs, "tg_members", s_members, &len) != ESP_OK || len != sizeof(s_members)) {
+            memset(s_members, 0, sizeof(s_members));
+        }
+        nvs_close(nvs);
+    }
+}
+
+static int members_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < MEMBERS_MAX; i++) {
+        n += s_members[i].chat != 0;
+    }
+    return n;
+}
+
+// 0 = the owner, n = member slot n-1, -1 = nobody we know
+static int who_of(int64_t chat)
+{
+    if (chat && chat == g_cfg.tg_owner) {
+        return 0;
+    }
+    for (int i = 0; i < MEMBERS_MAX; i++) {
+        if (chat && s_members[i].chat == chat) {
+            return i + 1;
+        }
+    }
+    return -1;
+}
+
+static int64_t chat_of(int who)
+{
+    return who > 0 && who <= MEMBERS_MAX && s_members[who - 1].chat ? s_members[who - 1].chat : g_cfg.tg_owner;
+}
+
+// the first name Telegram gives, kept to what the panel can draw
+static void sender_name(const cJSON *msg, char *out, size_t size)
+{
+    const char *first = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(msg, "from"), "first_name"));
+    text_sanitize(first ? first : "", out, size);
+    out[strcspn(out, "\n")] = '\0';
+}
+
+static void send_invite(int64_t chat_id)
+{
+    if (members_count() >= MEMBERS_MAX) {
+        reply(chat_id, T->tg_members_full);
+        return;
+    }
+    s_invite = 100000 + esp_random() % 900000;
+    s_invite_until = uptime_s() + INVITE_S;
+    if (!s_bot_user[0]) {
+        char url[160];
+        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/getMe", g_cfg.tg_token);
+        cJSON *me = net_http_json(url, NULL, 10000);
+        const char *user = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(me, "result"), "username"));
+        strlcpy(s_bot_user, user ? user : "", sizeof(s_bot_user));
+        cJSON_Delete(me);
+    }
+    // the link opens the bot and its Start button sends "/start <code>" by itself
+    char link[96], out[600];
+    if (s_bot_user[0]) {
+        snprintf(link, sizeof(link), "https://t.me/%s?start=%u", s_bot_user, (unsigned)s_invite);
+    } else {
+        strlcpy(link, "-", sizeof(link));
+    }
+    snprintf(out, sizeof(out), T->tg_invite_fmt, link, (unsigned)s_invite);
+    reply(chat_id, out);
+}
+
+// list with a "remove" button per person
+static void send_members(int64_t chat_id)
+{
+    if (!members_count()) {
+        reply(chat_id, T->tg_members_none);
+        return;
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddNumberToObject(body, "chat_id", (double)chat_id);
+    cJSON_AddStringToObject(body, "text", T->tg_members_title);
+    cJSON *rows = cJSON_AddArrayToObject(cJSON_AddObjectToObject(body, "reply_markup"), "inline_keyboard");
+    for (int i = 0; i < MEMBERS_MAX; i++) {
+        if (!s_members[i].chat) {
+            continue;
+        }
+        char label[64], data[32];
+        snprintf(label, sizeof(label), T->tg_member_remove_fmt, s_members[i].name[0] ? s_members[i].name : "?");
+        snprintf(data, sizeof(data), "rm:%" PRId64, s_members[i].chat);
+        cJSON *row = cJSON_CreateArray();
+        cJSON *btn = cJSON_CreateObject();
+        cJSON_AddStringToObject(btn, "text", label);
+        cJSON_AddStringToObject(btn, "callback_data", data);
+        cJSON_AddItemToArray(row, btn);
+        cJSON_AddItemToArray(rows, row);
+    }
+    char *json = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    char url[160];
+    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", g_cfg.tg_token);
+    cJSON_Delete(net_http_json(url, json, 10000));
+    free(json);
+}
+
+static bool member_remove(int64_t chat)
+{
+    int who = who_of(chat);
+    if (who <= 0) {
+        return false;
+    }
+    char out[160];
+    snprintf(out, sizeof(out), T->tg_member_removed_fmt, s_members[who - 1].name);
+    memset(&s_members[who - 1], 0, sizeof(s_members[who - 1]));
+    members_save();
+    sched_forget_who(who);
+    ESP_LOGI(TAG, "member removed");
+    reply(chat, T->tg_you_removed);
+    reply(g_cfg.tg_owner, out);
+    return true;
+}
+
+// someone we don't know sent the current invite code
+static bool try_join(int64_t chat_id, const cJSON *msg, const char *text)
+{
+    if (text && strncasecmp(text, "/start ", 7) == 0) {
+        text += 7;   // came through the invite link
+    }
+    if (!s_invite || !text || uptime_s() > s_invite_until || (uint32_t)strtoul(text, NULL, 10) != s_invite) {
+        return false;
+    }
+    for (int i = 0; i < MEMBERS_MAX; i++) {
+        if (!s_members[i].chat) {
+            s_members[i].chat = chat_id;
+            sender_name(msg, s_members[i].name, sizeof(s_members[i].name));
+            members_save();
+            s_invite = 0;
+            ESP_LOGI(TAG, "new member");
+            reply(chat_id, T->tg_member_welcome);
+            reply(chat_id, T->tg_help);
+            char out[160];
+            snprintf(out, sizeof(out), T->tg_member_joined_fmt, s_members[i].name);
+            reply(g_cfg.tg_owner, out);
+            return true;
+        }
+    }
+    return false;
+}
+
 // ---------- /agendar assistant ----------
 
 typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT, W_TG_DONE } wizard_step_t;
@@ -612,6 +806,7 @@ typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT, W_TG_DONE } wizard_step_
 static wizard_step_t s_step;
 static sched_t s_draft;
 static time_t s_step_time;
+static int64_t s_wiz_chat;   // whose assistant it is (one at a time)
 
 static void ask_when(int64_t chat_id)
 {
@@ -790,9 +985,9 @@ static void send_messages(int64_t chat_id)
             }
         }
         // 🔵 unread / ✅ read; ✉ direct / 🔔 scheduled
-        append(out, sizeof(out), &n, "\n%d. %s %s %s\n    %s%s\n", i + 1, m->unread ? "\xF0\x9F\x94\xB5" : "\xE2\x9C\x85",
+        append(out, sizeof(out), &n, "\n%d. %s %s %s\n    %s%s%s%s\n", i + 1, m->unread ? "\xF0\x9F\x94\xB5" : "\xE2\x9C\x85",
                m->scheduled ? "\xF0\x9F\x94\x94" : "\xE2\x9C\x89\xEF\xB8\x8F", m->unread ? T->tg_msg_unread : T->tg_msg_read,
-               text, when);
+               m->from, m->from[0] ? ": " : "", text, when);
     }
     reply(chat_id, out);
 }
@@ -807,6 +1002,8 @@ static void handle_command(int64_t chat_id, const char *text)
     static const char *const STATUS[] = {"/status", "/estado", "/ping"};
     static const char *const MESSAGES[] = {"/mensagens", "/messages", "/mensajes", "/msgs"};
     static const char *const RAIN[] = {"/chuva", "/rain", "/lluvia"};
+    static const char *const INVITE[] = {"/convidar", "/invite", "/invitar"};
+    static const char *const MEMBERS[] = {"/membros", "/members", "/miembros"};
 
     char cmd[32];
     strlcpy(cmd, text, sizeof(cmd));
@@ -815,11 +1012,24 @@ static void handle_command(int64_t chat_id, const char *text)
     const char *arg = strchr(text, ' ');
     arg = arg ? arg + strspn(arg, " ") : "";
 
-    bool in_wizard = s_step != W_IDLE;
-    s_step = W_IDLE;   // any command leaves the assistant
+    bool in_wizard = s_step != W_IDLE && chat_id == s_wiz_chat;
+    if (in_wizard) {
+        s_step = W_IDLE;   // any command leaves the assistant
+    }
+    bool owner = chat_id == g_cfg.tg_owner;
+    if (!owner && (is_cmd(cmd, RAIN, 3) || is_cmd(cmd, INVITE, 3) || is_cmd(cmd, MEMBERS, 3))) {
+        reply(chat_id, T->tg_owner_only);
+        return;
+    }
 
     if (is_cmd(cmd, HELP, 4)) {
-        reply(chat_id, T->tg_help);
+        char help[1200];
+        snprintf(help, sizeof(help), "%s%s", T->tg_help, owner ? T->tg_help_owner : "");
+        reply(chat_id, help);
+    } else if (is_cmd(cmd, INVITE, 3)) {
+        send_invite(chat_id);
+    } else if (is_cmd(cmd, MEMBERS, 3)) {
+        send_members(chat_id);
     } else if (is_cmd(cmd, STATUS, 3)) {
         send_status(chat_id);
     } else if (is_cmd(cmd, MESSAGES, 4)) {
@@ -844,6 +1054,8 @@ static void handle_command(int64_t chat_id, const char *text)
             return;
         }
         memset(&s_draft, 0, sizeof(s_draft));
+        s_draft.who = who_of(chat_id) > 0 ? who_of(chat_id) : 0;
+        s_wiz_chat = chat_id;
         s_step = W_TEXT;
         s_step_time = now;
         reply(chat_id, T->sch_ask_text);
@@ -880,14 +1092,17 @@ static void handle_message(const cJSON *msg)
         g_cfg.tg_owner = chat_id;
         config_save();
         ESP_LOGI(TAG, "new owner registered");
+        set_commands();
         reply(chat_id, T->tg_welcome);
         reply(chat_id, T->tg_help);
         if (!text || text[0] == '/') {
             return;
         }
-    } else if (chat_id != g_cfg.tg_owner) {
-        ESP_LOGW(TAG, "ignored a message from another chat");
-        reply(chat_id, T->tg_private);
+    } else if (who_of(chat_id) < 0) {
+        if (!try_join(chat_id, msg, text)) {
+            ESP_LOGW(TAG, "ignored a message from another chat");
+            reply(chat_id, T->tg_private);
+        }
         return;
     }
 
@@ -899,18 +1114,24 @@ static void handle_message(const cJSON *msg)
         handle_command(chat_id, text);
         return;
     }
-    if (s_step != W_IDLE && time(NULL) - s_step_time < WIZARD_IDLE_S) {
+    if (s_step != W_IDLE && chat_id == s_wiz_chat && time(NULL) - s_step_time < WIZARD_IDLE_S) {
         wizard_input(chat_id, text);
         return;
     }
-    s_step = W_IDLE;
+    if (chat_id == s_wiz_chat) {
+        s_step = W_IDLE;
+    }
 
     char clean[MSG_TEXT];
     if (!prepare_text(chat_id, text, clean, sizeof(clean))) {
         return;
     }
     ESP_LOGI(TAG, "message: %s", clean);
-    int n = msg_add_direct(clean);
+    char from[MSG_FROM] = "";
+    if (members_count()) {   // only one person: no name needed on the screen
+        sender_name(msg, from, sizeof(from));
+    }
+    int n = msg_add_direct(clean, from);
     if (n > 1) {
         char out[96];
         snprintf(out, sizeof(out), T->tg_ok_count_fmt, n);
@@ -953,6 +1174,7 @@ static QueueHandle_t s_rem_q;
 static struct {
     uint32_t id;
     int64_t occ;
+    int64_t chat;
     int64_t msg_id;
 } s_rem[SCHED_MAX];
 
@@ -995,10 +1217,10 @@ static void add_button(cJSON *body, const char *label, const char *data)
 }
 
 // replaces the button under a sent reminder; label "✅ Done 14:05" (fmt with the time) or none
-static void set_button(int64_t msg_id, const char *fmt)
+static void set_button(int64_t chat, int64_t msg_id, const char *fmt)
 {
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddNumberToObject(body, "chat_id", (double)g_cfg.tg_owner);
+    cJSON_AddNumberToObject(body, "chat_id", (double)chat);
     cJSON_AddNumberToObject(body, "message_id", (double)msg_id);
     char label[64];
     if (fmt) {
@@ -1028,7 +1250,7 @@ static void rem_handle(const rem_ev_t *ev)
     int i = rem_find(ev->id, ev->occ);
     if (ev->closed) {
         if (i >= 0) {   // deleted on the panel: the button says so
-            set_button(s_rem[i].msg_id, T->rem_done_panel_fmt);
+            set_button(s_rem[i].chat, s_rem[i].msg_id, T->rem_done_panel_fmt);
             s_rem[i].msg_id = 0;
         }
         return;
@@ -1040,8 +1262,9 @@ static void rem_handle(const rem_ev_t *ev)
     char text[SCHED_TEXT + 8], data[40];
     snprintf(text, sizeof(text), "\xF0\x9F\x94\x94 %s", s.text);   // 🔔
     snprintf(data, sizeof(data), "d:%" PRIu32 ":%" PRId64, ev->id, ev->occ);
+    int64_t chat = chat_of(s.who);   // whoever created it
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddNumberToObject(body, "chat_id", (double)g_cfg.tg_owner);
+    cJSON_AddNumberToObject(body, "chat_id", (double)chat);
     cJSON_AddStringToObject(body, "text", text);
     add_button(body, T->rem_done_btn, data);
     int64_t msg_id = 0;
@@ -1059,6 +1282,7 @@ static void rem_handle(const rem_ev_t *ev)
     }
     s_rem[slot].id = ev->id;
     s_rem[slot].occ = ev->occ;
+    s_rem[slot].chat = chat;
     s_rem[slot].msg_id = msg_id;
 }
 
@@ -1070,23 +1294,28 @@ static void handle_callback(const cJSON *cb)
     const char *data = cJSON_GetStringValue(cJSON_GetObjectItem(cb, "data"));
     const cJSON *msg = cJSON_GetObjectItem(cb, "message");
     int64_t msg_id = (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItem(msg, "message_id"));
+    int64_t chat = (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItem(cJSON_GetObjectItem(msg, "chat"), "id"));
     if (!cb_id) {
         return;
     }
     const char *answer = NULL;
     uint32_t id;
-    int64_t occ;
-    if (from == g_cfg.tg_owner && data && sscanf(data, "d:%" SCNu32 ":%" SCNd64, &id, &occ) == 2) {
+    int64_t occ, rm;
+    if (from == g_cfg.tg_owner && data && sscanf(data, "rm:%" SCNd64, &rm) == 1) {
+        answer = member_remove(rm) ? T->tg_member_gone : NULL;
+        set_button(chat, msg_id, NULL);
+        send_members(chat);
+    } else if (who_of(from) >= 0 && data && sscanf(data, "d:%" SCNu32 ":%" SCNd64, &id, &occ) == 2) {
         int i = rem_find(id, occ);
         if (i >= 0) {
             s_rem[i].msg_id = 0;   // before sched_done: its "deleted on the panel" event must not relabel it
         }
         if (sched_done(id, (time_t)occ)) {
             ESP_LOGI(TAG, "reminder done from Telegram");
-            set_button(msg_id, T->rem_done_fmt);
+            set_button(chat, msg_id, T->rem_done_fmt);
         } else {
             answer = T->rem_gone;
-            set_button(msg_id, NULL);
+            set_button(chat, msg_id, NULL);
         }
     }
     cJSON *body = cJSON_CreateObject();
@@ -1184,6 +1413,7 @@ void telegram_start(void)
     }
     s_notes = xQueueCreate(NOTE_QUEUE, NOTE_MAX);
     s_rem_q = xQueueCreate(SCHED_MAX, sizeof(rem_ev_t));
+    members_load();
     ESP_LOGI(TAG, "bot active");
     xTaskCreate(telegram_task, "telegram", 10240, NULL, 3, NULL);
 }

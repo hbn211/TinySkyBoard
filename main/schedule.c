@@ -20,7 +20,14 @@ typedef struct {
     uint32_t id;            // 0 = free slot
     int64_t when;
     char text[MSG_TEXT];
+    char from[MSG_FROM];
 } direct_t;
+
+typedef struct {            // "msgs" before the sender's name (1.3.0 and older)
+    uint32_t id;
+    int64_t when;
+    char text[MSG_TEXT];
+} direct_v1_t;
 
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
@@ -245,7 +252,18 @@ void msg_init(void)
             memset(s_unread_direct, 0, sizeof(s_unread_direct));
         }
         len = sizeof(s_direct);
-        if (nvs_get_blob(nvs, "msgs", s_direct, &len) != ESP_OK || len != sizeof(s_direct)) {
+        static direct_v1_t v1[MSG_DIRECT_MAX];
+        size_t len1 = sizeof(v1);
+        if (nvs_get_blob(nvs, "msgs", s_direct, &len) == ESP_OK && len == sizeof(s_direct)) {
+            // current format
+        } else if (nvs_get_blob(nvs, "msgs", v1, &len1) == ESP_OK && len1 == sizeof(v1)) {
+            memset(s_direct, 0, sizeof(s_direct));
+            for (int i = 0; i < MSG_DIRECT_MAX; i++) {
+                s_direct[i].id = v1[i].id;
+                s_direct[i].when = v1[i].when;
+                memcpy(s_direct[i].text, v1[i].text, sizeof(v1[i].text));
+            }
+        } else {
             memset(s_direct, 0, sizeof(s_direct));
             // the previous version stored a single message
             len = sizeof(s_direct[0].text);
@@ -275,7 +293,7 @@ void msg_init(void)
     xTaskCreate(msg_task, "agenda", 4096, NULL, 3, &s_task);
 }
 
-int msg_add_direct(const char *text)
+int msg_add_direct(const char *text, const char *from)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     int slot = 0;
@@ -291,6 +309,7 @@ int msg_add_direct(const char *text)
     s_direct[slot].id = s_next_direct_id++;
     s_direct[slot].when = time(NULL);
     strlcpy(s_direct[slot].text, text, sizeof(s_direct[slot].text));
+    strlcpy(s_direct[slot].from, from ? from : "", sizeof(s_direct[slot].from));
     s_unread_direct[slot] = 1;
     save_direct();
     save_unread();
@@ -315,6 +334,7 @@ int msg_active(msg_item_t *out, int max)
             out[n].scheduled = false;
             out[n].unread = s_unread_direct[i];
             out[n].when = (time_t)s_direct[i].when;
+            strlcpy(out[n].from, s_direct[i].from, sizeof(out[n].from));
             strlcpy(out[n].text, s_direct[i].text, sizeof(out[n].text));
             n++;
         }
@@ -326,6 +346,7 @@ int msg_active(msg_item_t *out, int max)
             out[n].scheduled = true;
             out[n].unread = s_unread_sched[i];
             out[n].when = occ;
+            out[n].from[0] = '\0';
             strlcpy(out[n].text, s_sched[i].text, sizeof(out[n].text));
             n++;
         }
@@ -601,6 +622,22 @@ bool sched_get(uint32_t id, sched_t *out)
     return ok;
 }
 
+void sched_forget_who(uint8_t who)
+{
+    bool changed = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (s_sched[i].id && s_sched[i].who == who) {
+            s_sched[i].who = 0;
+            changed = true;
+        }
+    }
+    if (changed) {
+        save_sched();
+    }
+    xSemaphoreGive(s_lock);
+}
+
 bool sched_add(const sched_t *s)
 {
     bool ok = false;
@@ -640,8 +677,10 @@ bool sched_update(uint32_t id, const sched_t *s)
             if (sched_is_active(&s_sched[i], now, &occ)) {
                 telegram_reminder(id, occ, true);   // the old occurrence leaves the screen
             }
+            uint8_t who = s_sched[i].who;   // edited on the page: still the same person's
             s_sched[i] = *s;
             s_sched[i].id = id;
+            s_sched[i].who = who;
             s_announced[i] = 0;
             s_dismissed[i] = 0;
             s_unread_sched[i] = false;

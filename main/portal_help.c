@@ -126,7 +126,9 @@ static const char HELP_PT[] =
 
     "<h2>Telegram</h2>"
     "<p>Crie um bot com o <b>@BotFather</b> (<code>/newbot</code>) e cole o token na configuração. "
-    "O primeiro chat que falar com o bot vira o dono; mensagens de outras pessoas são ignoradas.</p><ul>"
+    "O primeiro chat que falar com o bot vira o dono. Com <code>/convidar</code> o dono gera um link (ou código) "
+    "para até 4 pessoas da casa também mandarem mensagens; <code>/membros</code> mostra quem e remove. Com mais "
+    "alguém, a mensagem mostra o nome de quem mandou. Alertas e <code>/chuva</code> são só do dono.</p><ul>"
     "<li><b>Qualquer texto</b> aparece no painel e o bot responde ✓.</li>"
     "<li><code>/agendar</code> programa uma mensagem: hora, duração e se repete. Se quiser, o lembrete "
     "chega também no Telegram quando aparece, com um botão <b>✅ Feito</b> que tira da tela.</li>"
@@ -247,7 +249,9 @@ static const char HELP_EN[] =
 
     "<h2>Telegram</h2>"
     "<p>Create a bot with <b>@BotFather</b> (<code>/newbot</code>) and paste the token in the setup. "
-    "The first chat that talks to the bot becomes the owner; messages from anyone else are ignored.</p><ul>"
+    "The first chat that talks to the bot becomes the owner. With <code>/invite</code> the owner gets a link (or "
+    "code) so up to 4 people at home can send messages too; <code>/members</code> lists and removes them. With "
+    "more than one person, messages show the sender's name. Alerts and <code>/rain</code> stay with the owner.</p><ul>"
     "<li><b>Any text</b> shows up on the panel and the bot replies ✓.</li>"
     "<li><code>/schedule</code> schedules a message: time, duration and repeat. Optionally the reminder "
     "also arrives in Telegram when it shows, with a <b>✅ Done</b> button that clears it from the screen.</li>"
@@ -369,7 +373,10 @@ static const char HELP_ES[] =
 
     "<h2>Telegram</h2>"
     "<p>Crea un bot con <b>@BotFather</b> (<code>/newbot</code>) y pega el token en la configuración. "
-    "El primer chat que hable con el bot se vuelve el dueño; los mensajes de otras personas se ignoran.</p><ul>"
+    "El primer chat que hable con el bot se vuelve el dueño. Con <code>/invitar</code> el dueño obtiene un enlace "
+    "(o código) para que hasta 4 personas de casa también manden mensajes; <code>/miembros</code> muestra quién y "
+    "permite quitar. Con más de una persona, el mensaje muestra quién lo mandó. Las alertas y <code>/lluvia</code> "
+    "son solo del dueño.</p><ul>"
     "<li><b>Cualquier texto</b> aparece en el panel y el bot responde ✓.</li>"
     "<li><code>/programar</code> programa un mensaje: hora, duración y si se repite. Si quieres, el "
     "recordatorio llega también a Telegram cuando aparece, con un botón <b>✅ Hecho</b> que lo quita de la pantalla.</li>"
