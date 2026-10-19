@@ -6,6 +6,12 @@
 
 - Sensor comparisons were never saved: the Govee IDs ("AA:BB:…") arrive URL-encoded and longer
   than the field they were read into. Every setup-page field is now decoded before it's cut to size.
+- Comparison page: the sensor cards use their space (name, large temperature, humidity) and the text
+  under the difference wraps instead of hiding under the cards.
+- Govee sensors show up right after power-on with their first reading, instead of waiting for the
+  reading to change (up to one upload interval, longer indoors); "updated HH:MM" comes with the first change.
+- Weather details: at night the UV tile says just "UV max" (it was cut as "UV · today's…"); tile
+  titles that don't fit roll instead of being cut.
 
 ## 1.5.1 — 2026-10-18
 

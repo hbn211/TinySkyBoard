@@ -378,12 +378,11 @@ static void poll_sensor(int i)
 
 static bool visible(int i, int64_t mono)
 {
-    // only after a change was seen: until then the value's age is unknown (could be hours, if the sensor died).
+    // from the first reading: its age is unknown, but a dead sensor is only noticed after GOVEE_SILENT_S anyway.
     // The API's "online" flag isn't used: it flickers off for a moment while the sensor keeps uploading
     // (each flicker meant a "stopped sending" alert), and it stays on after the battery dies.
     const govee_track_t *t = &s_track[i];
-    return t->has_value && s_sensors[i].changed_at &&
-           mono - t->alive_at <= GOVEE_SILENT_S;
+    return t->has_value && mono - t->alive_at <= GOVEE_SILENT_S;
 }
 
 static void govee_task(void *arg)
@@ -411,7 +410,7 @@ static void govee_task(void *arg)
                 ESP_LOGI(TAG, "%s %s the screen", s_sensors[i].name, v ? "is on" : "left");
                 govee_track_t *t = &s_track[i];
                 char msg[200];
-                if (!v && s_alert_silent && s_sensors[i].changed_at && !(t->alerted & ALERT_SILENT)) {
+                if (!v && s_alert_silent && t->has_value && !(t->alerted & ALERT_SILENT)) {
                     t->alerted |= ALERT_SILENT;
                     snprintf(msg, sizeof(msg), T->al_silent_fmt, s_sensors[i].name,
                              (int)((mono_s() - t->alive_at) / 3600));

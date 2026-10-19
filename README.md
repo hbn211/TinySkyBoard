@@ -251,8 +251,8 @@ its last value after the battery dies. So the panel works from **changes**:
 
 - It polls every 5 s until the value changes (that's the upload), then sleeps until 30 s before
   the next expected upload. That's roughly 1,000 requests per sensor per day.
-- **"updated HH:MM"** is when the reading last changed. After power-on, a sensor only shows up
-  once its reading changes (up to one interval), so a value of unknown age is never shown.
+- **"updated HH:MM"** is when the reading last changed. After power-on a sensor shows up with its
+  first reading right away; the time appears with the first change.
 - A sensor whose reading doesn't change at all for **12 hours** leaves the screen until it changes
   again (`/status` still lists it, with a warning). An indoor sensor can repeat the same value for a
   while, which looks like silence; 12 hours always cross the day's low or high.
