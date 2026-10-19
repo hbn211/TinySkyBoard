@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1 — 2026-10-19
+
+### Fixes
+
+- The airing-out hint never showed (and its alert never went out): the pair's sensors were looked up
+  by an ID field that is only filled for the screen. They're matched by the stored ID now.
+
 ## 1.6.0 — 2026-10-19
 
 - **Dew point** on every Govee sensor card: the water actually in the air, which relative humidity

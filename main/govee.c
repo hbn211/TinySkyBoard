@@ -482,7 +482,7 @@ static void govee_task(void *arg)
 static int sensor_index(const char *device)
 {
     for (int i = 0; i < s_n; i++) {
-        if (device[0] && strcmp(s_sensors[i].device, device) == 0) {
+        if (device[0] && strcmp(s_track[i].device, device) == 0) {   // the ID lives in the track
             return i;
         }
     }
@@ -494,7 +494,7 @@ static void check_vent(int i)
 {
     for (int k = 0; k < GOVEE_CMP_MAX; k++) {
         if (!(s_cmp_opt & GOVEE_CMP_OUT(k)) ||
-            (strcmp(s_cmps[k].a, s_sensors[i].device) != 0 && strcmp(s_cmps[k].b, s_sensors[i].device) != 0)) {
+            (strcmp(s_cmps[k].a, s_track[i].device) != 0 && strcmp(s_cmps[k].b, s_track[i].device) != 0)) {
             continue;
         }
         xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -511,6 +511,7 @@ static void check_vent(int i)
         s_vent[k].known = true;
         s_vent[k].state = next;
         s_version++;
+        ESP_LOGI(TAG, "vent %d: dTd %.1f -> state %d", k, din - dout, next);
         if (first || next == prev || !(s_cmp_opt & GOVEE_CMP_ALERT(k)) || ui_night_hours_now()) {
             continue;   // after power-on only the state; at night nothing (dropped, not queued)
         }
