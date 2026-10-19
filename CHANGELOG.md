@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Sensor comparisons were never saved: the Govee IDs ("AA:BB:…") arrive URL-encoded and longer
+  than the field they were read into. Every setup-page field is now decoded before it's cut to size.
+
 ## 1.5.1 — 2026-10-18
 
 ### Fixes

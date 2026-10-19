@@ -748,13 +748,17 @@ static void url_decode(char *s)
     *o = '\0';
 }
 
+// The value arrives URL-encoded and can be ~3x longer than decoded (a Govee ID "AA:BB:..." of 23
+// characters is 37 with %3A): read it into a large buffer, decode, then copy (one request at a time)
 static bool form_value(const char *body, const char *key, char *out, size_t size)
 {
-    if (httpd_query_key_value(body, key, out, size) != ESP_OK) {
+    static char raw[2048];
+    if (httpd_query_key_value(body, key, raw, sizeof(raw)) != ESP_OK) {
         out[0] = '\0';
         return false;
     }
-    url_decode(out);
+    url_decode(raw);
+    strlcpy(out, raw, size);
     return true;
 }
 
