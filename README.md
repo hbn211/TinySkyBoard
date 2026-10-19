@@ -21,7 +21,7 @@ itself: no reflashing when you move or change networks.
 > pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
 > press **RESET**. The same page updates a board later and keeps its settings.
 
-**Version 1.6.1** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.6.2** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -277,10 +277,15 @@ humidity and dew point differences (cyan when A holds more water, sand when less
 its reading and dew point. It shows only while both sensors have fresh readings.
 
 Two options per pair:
-- **Sensor B is outdoors** adds **Air out: yes / no / either** at the bottom: yes once the dew point
-  inside is 3 °C above outside (until it drops under 2.5 °C), no at 1 °C or less (until it rises over
-  1.5 °C). The margins cover the sensors' ±3 % humidity, so the hint doesn't flicker. It only talks
-  about moisture, not about heating or cooling the house.
+- **Sensor B is outdoors** adds **Air out: yes / no / either** at the bottom. **Yes** (a pulsing
+  green band) needs both: the humidity inside at the limit or above (**60 %** by default, set under
+  *Compare sensors*; mould risk starts around there) and the dew point inside 3 °C above outside.
+  It holds until the humidity drops 5 % under the limit or the difference under 2.5 °C. **No** when
+  the air outside holds as much water (difference ≤ 1 °C, until over 1.5 °C). Otherwise *either*:
+  drier air outside alone isn't a reason to cool the house. The margins cover the sensors' ±3 %
+  humidity, so the hint doesn't flicker.
+  Air out wide open for 5–10 minutes and close: a quick change of air doesn't cool the walls and
+  furniture, while a tilted window for hours wastes heating.
 - **Telegram alert when airing out helps** (with the first option on): "good time to air out" when
   the hint turns to yes, at most once every 3 hours per pair, and "you can close the windows" when it
   turns to no after one of those, sent to the owner and the invited people. Nothing at power-on or

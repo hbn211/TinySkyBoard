@@ -4,17 +4,22 @@
 #pragma once
 
 #include <math.h>
+#include <stdbool.h>
 
 #define PSY_A 17.625f
 #define PSY_B 243.04f   // °C
 #define PSY_C 0.61094f  // kPa
 
 // Airing-out hint from dTd = dew point inside - dew point outside (°C), with hysteresis: a sensor's
-// humidity is ~±3 %, about ±0.5 °C of dew point, so ~±0.7 °C on a difference of two sensors
+// humidity is ~±3 %, about ±0.5 °C of dew point, so ~±0.7 °C on a difference of two sensors.
+// "Yes" also needs the inside humidity at the limit or above (mould risk; until 5 % under it): drier
+// air outside alone isn't a reason to cool the house
 #define PSY_VENT_YES_ENTER_C 3.0f
 #define PSY_VENT_YES_EXIT_C  2.5f
 #define PSY_VENT_NO_ENTER_C  1.0f
 #define PSY_VENT_NO_EXIT_C   1.5f
+#define PSY_VENT_RH_DEFAULT  60     // inside humidity (%) from which airing out is worth it
+#define PSY_VENT_RH_EXIT     5      // "yes" holds until the humidity is this far under the limit
 
 typedef enum { PSY_VENT_NEUTRAL = 0, PSY_VENT_YES, PSY_VENT_NO } psy_vent_t;
 
@@ -26,13 +31,16 @@ static inline float psy_dew_point_c(float t_c, float rh)
     return PSY_B * g / (PSY_A - g);
 }
 
-static inline psy_vent_t psy_vent_next(psy_vent_t prev, float dtd_c)
+// rh_in = inside humidity (%), rh_limit = from which it's worth airing out
+static inline psy_vent_t psy_vent_next(psy_vent_t prev, float dtd_c, float rh_in, int rh_limit)
 {
-    if (prev == PSY_VENT_YES && dtd_c >= PSY_VENT_YES_EXIT_C) {
+    bool yes = prev == PSY_VENT_YES ? dtd_c >= PSY_VENT_YES_EXIT_C && rh_in >= rh_limit - PSY_VENT_RH_EXIT
+                                    : dtd_c >= PSY_VENT_YES_ENTER_C && rh_in >= rh_limit;
+    if (yes) {
         return PSY_VENT_YES;
     }
-    if (prev == PSY_VENT_NO && dtd_c <= PSY_VENT_NO_EXIT_C) {
-        return PSY_VENT_NO;
+    if (prev == PSY_VENT_NO ? dtd_c <= PSY_VENT_NO_EXIT_C : dtd_c <= PSY_VENT_NO_ENTER_C) {
+        return PSY_VENT_NO;   // the air outside holds as much water or more: airing out won't dry
     }
-    return dtd_c >= PSY_VENT_YES_ENTER_C ? PSY_VENT_YES : dtd_c <= PSY_VENT_NO_ENTER_C ? PSY_VENT_NO : PSY_VENT_NEUTRAL;
+    return PSY_VENT_NEUTRAL;
 }

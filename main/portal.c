@@ -3,6 +3,7 @@
 #include "i18n.h"
 #include "board.h"
 #include "schedule.h"
+#include "psychro.h"
 
 #include <string.h>
 #include <ctype.h>
@@ -444,6 +445,10 @@ static void send_compare(httpd_req_t *req, const i18n_t *L)
         out(req, L->p_cmp_alert);
         out(req, "</label>");
     }
+    send_time(req, "vent_rh", L->p_vent_rh, 40, 85, PSY_VENT_RH_DEFAULT, "%");
+    out(req, "<small>");
+    out(req, L->p_vent_rh_hint);
+    out(req, "</small>");
 }
 
 static void save_compare(const char *body)
@@ -474,6 +479,11 @@ static void save_compare(const char *body)
         }
     }
     config_set_u8("cmp_opt", opt);
+    char v[8];
+    if (form_value(body, "vent_rh", v, sizeof(v))) {
+        int rh = atoi(v);
+        config_set_u8("vent_rh", rh < 40 ? 40 : rh > 85 ? 85 : rh);
+    }
 }
 
 // From/to time fields (minutes of the day); the value is always "HH:MM", the phone shows its own picker

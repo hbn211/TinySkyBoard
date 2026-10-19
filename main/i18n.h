@@ -100,7 +100,8 @@ typedef struct {
     const char *sens_dew_fmt;       // sensor card alone: "dew point 11.6°"
     const char *sens_dew_short_fmt; // two cards / comparison: "dew 11.6°"
     const char *vent_yes, *vent_no, *vent_either;   // airing-out hint (comparison, B outdoors)
-    const char *al_vent_yes_fmt;    // %s dew point inside, %s outside
+    const char *al_vent_yes_fmt;    // %d humidity inside, %s dew point inside, %s outside
+    const char *p_vent_rh, *p_vent_rh_hint;   // setup page: inside humidity from which to air out
     const char *al_vent_close_fmt;
     const char *p_cmp_out, *p_cmp_alert;   // setup page, per comparison
     const char *sens_title;         // Govee sensors screen

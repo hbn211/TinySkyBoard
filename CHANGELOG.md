@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.2 — 2026-10-19
+
+- Airing out: **"yes" only when the humidity inside is high** (60 % by default, adjustable on the
+  setup page; holds until 5 % under it) besides the drier air outside, so the house isn't cooled
+  whenever it's cold outside. The Telegram message gives the humidity inside and says to open the
+  windows wide for 5–10 minutes and close them.
+
 ## 1.6.1 — 2026-10-19
 
 ### Fixes

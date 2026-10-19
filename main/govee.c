@@ -65,6 +65,7 @@ static bool s_alert_silent;   // "a sensor stopped sending" alert (setup page)
 #define VENT_ALERT_GAP_S  (3 * 3600)   // at most one "good time to air out" per pair in this time
 static govee_cmp_t s_cmps[GOVEE_CMP_MAX];
 static uint8_t s_cmp_opt;     // GOVEE_CMP_OUT / GOVEE_CMP_ALERT bits
+static int s_vent_rh = PSY_VENT_RH_DEFAULT;   // NVS "vent_rh": inside humidity from which to air out
 static struct {
     bool known;               // evaluated once (the first evaluation only sets the state, no alert)
     psy_vent_t state;
@@ -502,16 +503,17 @@ static void check_vent(int i)
         bool ok = a >= 0 && b >= 0 && s_track[a].has_value && s_track[b].has_value &&
                   !isnan(s_sensors[a].dew_c) && !isnan(s_sensors[b].dew_c);
         float din = ok ? s_sensors[a].dew_c : 0, dout = ok ? s_sensors[b].dew_c : 0;
+        float rh_in = ok ? s_sensors[a].humidity : 0;
         xSemaphoreGive(s_lock);
         if (!ok) {
             continue;
         }
-        psy_vent_t prev = s_vent[k].state, next = psy_vent_next(prev, din - dout);
+        psy_vent_t prev = s_vent[k].state, next = psy_vent_next(prev, din - dout, rh_in, s_vent_rh);
         bool first = !s_vent[k].known;
         s_vent[k].known = true;
         s_vent[k].state = next;
         s_version++;
-        ESP_LOGI(TAG, "vent %d: dTd %.1f -> state %d", k, din - dout, next);
+        ESP_LOGI(TAG, "vent %d: dTd %.1f, inside %.0f%% -> state %d", k, din - dout, rh_in, next);
         if (first || next == prev || !(s_cmp_opt & GOVEE_CMP_ALERT(k)) || ui_night_hours_now()) {
             continue;   // after power-on only the state; at night nothing (dropped, not queued)
         }
@@ -519,7 +521,7 @@ static void check_vent(int i)
         if (next == PSY_VENT_YES && (!s_vent[k].yes_at || mono_s() - s_vent[k].yes_at >= VENT_ALERT_GAP_S)) {
             fmt_temp(vin, sizeof(vin), din);
             fmt_temp(vout, sizeof(vout), dout);
-            snprintf(msg, sizeof(msg), T->al_vent_yes_fmt, vin, vout);
+            snprintf(msg, sizeof(msg), T->al_vent_yes_fmt, (int)(rh_in + 0.5f), vin, vout);
             telegram_notify_all(msg);   // whoever is at home can open the windows
             s_vent[k].yes_sent = true;
             s_vent[k].yes_at = mono_s();
@@ -543,6 +545,7 @@ void govee_start(void)
 {
     govee_cmp_load(s_cmps);
     s_cmp_opt = config_get_u8("cmp_opt");
+    s_vent_rh = config_get_u8_def("vent_rh", PSY_VENT_RH_DEFAULT);
     s_interval_s = config_get_u8_def("govee_int", GOVEE_DEFAULT_MIN) * 60;
     s_nalerts = govee_alerts_load(s_alerts, GOVEE_MAX);
     s_alert_silent = config_get_u8("galert_q");
