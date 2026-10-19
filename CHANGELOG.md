@@ -8,6 +8,10 @@
   than the field they were read into. Every setup-page field is now decoded before it's cut to size.
 - Comparison page: the sensor cards use their space (name, large temperature, humidity) and the text
   under the difference wraps instead of hiding under the cards.
+- Govee trend arrow: it disappeared when the temperature stayed the same for over an hour (the
+  history only had changes); now a value holds until the next change, the trend is recomputed every
+  minute and shows "–" for a steady sensor from 30 min after power-on.
+- Comparison page: the humidity difference in a larger font, under its label.
 - Govee sensors show up right after power-on with their first reading, instead of waiting for the
   reading to change (up to one upload interval, longer indoors); "updated HH:MM" comes with the first change.
 - Weather details: at night the UV tile says just "UV max" (it was cut as "UV · today's…"); tile

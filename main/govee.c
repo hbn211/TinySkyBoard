@@ -118,6 +118,8 @@ static bool fetch_list(void)
 }
 
 // Day's min/max and the trend: the new reading against the oldest one of the last hour
+static bool update_trend(govee_sensor_t *s, govee_track_t *t, time_t now);
+
 static void add_reading(govee_sensor_t *s, govee_track_t *t, float temp_c, time_t now)
 {
     struct tm tm;
@@ -133,7 +135,9 @@ static void add_reading(govee_sensor_t *s, govee_track_t *t, float temp_c, time_
         s->day_max = temp_c;
     }
 
-    while (t->hist_n > 0 && (now - t->hist_t[0] > TREND_WINDOW_S || t->hist_n == HIST_N)) {
+    // readings are changes: a value holds until the next one. Keep one reading from before the window
+    // (the value an hour ago), drop older ones
+    while (t->hist_n > 1 && (t->hist_t[1] <= now - TREND_WINDOW_S || t->hist_n == HIST_N)) {
         memmove(t->hist, t->hist + 1, (t->hist_n - 1) * sizeof(t->hist[0]));
         memmove(t->hist_t, t->hist_t + 1, (t->hist_n - 1) * sizeof(t->hist_t[0]));
         t->hist_n--;
@@ -141,10 +145,26 @@ static void add_reading(govee_sensor_t *s, govee_track_t *t, float temp_c, time_
     t->hist[t->hist_n] = temp_c;
     t->hist_t[t->hist_n] = now;
     t->hist_n++;
+    update_trend(s, t, now);
+}
 
+// Now against an hour ago (or since the first reading, after 30 min). Also called every minute, so a
+// steady sensor keeps its "–" and a change older than an hour stops counting.
+static bool update_trend(govee_sensor_t *s, govee_track_t *t, time_t now)
+{
+    int old_trend = s->trend;
+    bool old_has = s->has_trend;
+    if (t->hist_n == 0) {
+        return false;
+    }
+    float base = t->hist[0];   // the value an hour ago: the last reading at or before then
+    for (int k = 0; k < t->hist_n && t->hist_t[k] <= now - TREND_WINDOW_S; k++) {
+        base = t->hist[k];
+    }
     s->has_trend = now - t->hist_t[0] >= TREND_MIN_S;
-    float delta = temp_c - t->hist[0];
+    float delta = t->hist[t->hist_n - 1] - base;
     s->trend = !s->has_trend ? 0 : delta >= TREND_C ? 1 : delta <= -TREND_C ? -1 : 0;
+    return s->trend != old_trend || s->has_trend != old_has;
 }
 
 // ---------- alerts ----------
@@ -397,6 +417,18 @@ static void govee_task(void *arg)
                 continue;
             }
             list_at = mono;
+        }
+        static int64_t trend_at;
+        if (mono - trend_at >= 60) {   // the trend moves with time too, not only with new readings
+            trend_at = mono;
+            time_t now = time(NULL);
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            for (int i = 0; i < s_n; i++) {
+                if (s_track[i].has_value && update_trend(&s_sensors[i], &s_track[i], now)) {
+                    s_version++;
+                }
+            }
+            xSemaphoreGive(s_lock);
         }
         for (int i = 0; i < s_n; i++) {
             if (mono_s() >= s_track[i].next_poll) {

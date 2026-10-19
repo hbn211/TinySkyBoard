@@ -1661,16 +1661,20 @@ static void render_cmp(void)
     lv_label_set_long_mode(dh, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(dh, mid_w);
     lv_obj_set_style_text_align(dh, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t *dv = label(s_cmp_panel, &font_pt_20, lv_color_white());   // humidity difference, readable
+    lv_label_set_text(dv, "");
     if (same) {
         lv_label_set_text(dh, T->cmp_same);
     } else if (a->humidity >= 0 && b->humidity >= 0) {
-        label_fmt(dh, T->cmp_hum_fmt, a->humidity - b->humidity);
+        lv_label_set_text(dh, T->cmp_hum);
+        label_fmt(dv, "%+.0f%%", a->humidity - b->humidity);
     } else {
         lv_label_set_text(dh, "");
     }
     int cy = landscape ? 40 + (h - 46) / 2 : (40 + 76 + (h - 8 - 76)) / 2;   // middle between the cards
-    lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, cy - 26);
-    lv_obj_align(dh, LV_ALIGN_TOP_MID, 0, cy + 8);
+    lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, cy - (landscape ? 34 : 30));
+    lv_obj_align(dh, LV_ALIGN_TOP_MID, 0, cy + (landscape ? 0 : 2));
+    lv_obj_align(dv, LV_ALIGN_TOP_MID, 0, cy + (landscape ? 16 : 16));
 }
 
 static void show_cmp(int k)

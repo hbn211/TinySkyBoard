@@ -95,7 +95,7 @@ typedef struct {
     const char *work_title;         // "work" weather page
     const char *work_chart;         // "Next 12 h: rain % and temperature"
     const char *cmp_title;          // sensor comparison page
-    const char *cmp_hum_fmt;        // %+.0f = humidity difference
+    const char *cmp_hum;            // comparison: the word above the humidity difference
     const char *cmp_same;           // "same temperature"
     const char *sens_title;         // Govee sensors screen
     const char *sens_updated_fmt;   // %s = time of the last new reading
