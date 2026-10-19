@@ -9,7 +9,8 @@
   point on its card.
 - **Airing out**: per comparison, "sensor B is outdoors" adds *Air out: yes / no / either* (dew point
   inside vs outside, 3 °C margin with hysteresis), and an optional Telegram alert when airing out
-  helps and when you can close the windows (at most every 3 h, never at power-on or at night).
+  helps and when you can close the windows, to everyone on the bot (at most every 3 h, never at
+  power-on or at night). "Air out: yes" shows as a pulsing green band.
 - The configuration backup carries the new options; an older file loads with them off.
 
 ## 1.5.2 — 2026-10-19

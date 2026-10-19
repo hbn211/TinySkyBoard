@@ -1624,9 +1624,9 @@ static void cmp_side(lv_obj_t *parent, int x, int y, int w, int h, const govee_s
         label_fmt(dw, T->sens_dew_short_fmt, temp_unit(g->dew_c));
     }
     if (tall) {
-        lv_obj_set_pos(t, 0, 17);
+        lv_obj_set_pos(t, 0, 14);
         if (hu) {
-            lv_obj_set_pos(hu, 0, 50);
+            lv_obj_set_pos(hu, 0, 45);
         }
         if (dw) {
             lv_obj_align(dw, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -1655,7 +1655,7 @@ static void cmp_row(int cx, int y, bool stacked, const char *name, const char *v
     int nw = lv_obj_get_width(n), vw = lv_obj_get_width(v);
     if (stacked) {
         lv_obj_set_pos(n, cx - nw / 2, y);
-        lv_obj_set_pos(v, cx - vw / 2, y + 13);
+        lv_obj_set_pos(v, cx - vw / 2, y + 12);
     } else {
         int x0 = cx - (nw + 6 + vw) / 2;
         lv_obj_set_pos(n, x0, y + 6);
@@ -1692,7 +1692,7 @@ static void render_cmp(void)
     lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
 
     int vent = govee_vent(slot);   // B outdoors: airing-out hint in a line at the bottom
-    int vent_h = vent >= 0 ? 24 : 0;
+    int vent_h = vent == PSY_VENT_YES ? 32 : vent >= 0 ? 24 : 0;
 
     // differences in the panel's unit: a difference of temperatures is only scaled (x1.8), never offset
     float k = s_fahrenheit ? 9.0f / 5.0f : 1.0f;
@@ -1717,7 +1717,7 @@ static void render_cmp(void)
         int cw = 100, ch = h - 46 - vent_h;
         cmp_side(s_cmp_panel, 10, 40, cw, ch, a, true);
         cmp_side(s_cmp_panel, w - 10 - cw, 40, cw, ch, b, true);
-        cy = 36;
+        cy = 34;   // the middle column ends at ~132, above the airing-out band (from 138)
     } else {
         int cw = w - 20, ch = 76;
         cmp_side(s_cmp_panel, 10, 40, cw, ch, a, false);
@@ -1733,20 +1733,40 @@ static void render_cmp(void)
         label_fmt(dl, "%+.1f" DEG, d);
     }
     lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, cy);
-    int y = cy + (landscape ? 34 : 34);
+    int y = cy + (landscape ? 31 : 34);
     if (hum[0]) {
         cmp_row(w / 2, y, stacked, T->cmp_hum, hum, lv_color_white());
-        y += landscape ? 36 : 28;
+        y += landscape ? 33 : 28;
     }
     if (has_dew) {
         cmp_row(w / 2, y, stacked, T->cmp_dew, dew, dew_color);
     }
 
-    if (vent >= 0) {
-        lv_obj_t *vl = label(s_cmp_panel, &font_pt_14, vent == PSY_VENT_YES ? lv_color_hex(0x81c784) :
-                                                       vent == PSY_VENT_NO ? lv_color_hex(0xe57373) : COLOR_MUTED);
-        label_fmt(vl, "%s %s", vent == PSY_VENT_YES ? LV_SYMBOL_OK : vent == PSY_VENT_NO ? LV_SYMBOL_CLOSE : LV_SYMBOL_MINUS,
-                  vent == PSY_VENT_YES ? T->vent_yes : vent == PSY_VENT_NO ? T->vent_no : T->vent_either);
+    if (vent == PSY_VENT_YES) {
+        // time to air out: a green band across the bottom, breathing gently so it's seen from afar
+        lv_obj_t *band = lv_obj_create(s_cmp_panel);
+        lv_obj_remove_style_all(band);
+        lv_obj_set_size(band, w - 20, vent_h - 2);
+        lv_obj_align(band, LV_ALIGN_BOTTOM_MID, 0, -4);
+        lv_obj_set_style_radius(band, 8, 0);
+        lv_obj_set_style_bg_color(band, lv_color_hex(0x2e9d4a), 0);
+        lv_obj_set_style_bg_opa(band, LV_OPA_COVER, 0);
+        lv_obj_t *vl = label(band, &font_pt_20, lv_color_white());
+        label_fmt(vl, LV_SYMBOL_OK " %s", T->vent_yes);
+        lv_obj_center(vl);
+        lv_anim_t an;
+        lv_anim_init(&an);
+        lv_anim_set_var(&an, band);
+        lv_anim_set_exec_cb(&an, slide_opa_cb);
+        lv_anim_set_values(&an, LV_OPA_60, LV_OPA_COVER);
+        lv_anim_set_duration(&an, 1200);
+        lv_anim_set_reverse_duration(&an, 1200);
+        lv_anim_set_repeat_count(&an, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&an);
+    } else if (vent >= 0) {
+        lv_obj_t *vl = label(s_cmp_panel, &font_pt_14, vent == PSY_VENT_NO ? lv_color_hex(0xe57373) : COLOR_MUTED);
+        label_fmt(vl, "%s %s", vent == PSY_VENT_NO ? LV_SYMBOL_CLOSE : LV_SYMBOL_MINUS,
+                  vent == PSY_VENT_NO ? T->vent_no : T->vent_either);
         lv_obj_align(vl, LV_ALIGN_BOTTOM_MID, 0, -6);
     }
 }

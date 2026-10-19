@@ -502,11 +502,6 @@ static void check_vent(int i)
         bool ok = a >= 0 && b >= 0 && s_track[a].has_value && s_track[b].has_value &&
                   !isnan(s_sensors[a].dew_c) && !isnan(s_sensors[b].dew_c);
         float din = ok ? s_sensors[a].dew_c : 0, dout = ok ? s_sensors[b].dew_c : 0;
-        char na[32], nb[32];
-        if (ok) {
-            strlcpy(na, s_sensors[a].name, sizeof(na));
-            strlcpy(nb, s_sensors[b].name, sizeof(nb));
-        }
         xSemaphoreGive(s_lock);
         if (!ok) {
             continue;
@@ -523,13 +518,13 @@ static void check_vent(int i)
         if (next == PSY_VENT_YES && (!s_vent[k].yes_at || mono_s() - s_vent[k].yes_at >= VENT_ALERT_GAP_S)) {
             fmt_temp(vin, sizeof(vin), din);
             fmt_temp(vout, sizeof(vout), dout);
-            snprintf(msg, sizeof(msg), T->al_vent_yes_fmt, na, nb, vin, vout);
-            telegram_notify(msg);
+            snprintf(msg, sizeof(msg), T->al_vent_yes_fmt, vin, vout);
+            telegram_notify_all(msg);   // whoever is at home can open the windows
             s_vent[k].yes_sent = true;
             s_vent[k].yes_at = mono_s();
         } else if (next == PSY_VENT_NO && s_vent[k].yes_sent) {
-            snprintf(msg, sizeof(msg), T->al_vent_close_fmt, na, nb);
-            telegram_notify(msg);
+            snprintf(msg, sizeof(msg), "%s", T->al_vent_close_fmt);
+            telegram_notify_all(msg);
             s_vent[k].yes_sent = false;
         }
     }

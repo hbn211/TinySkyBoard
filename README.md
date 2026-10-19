@@ -283,7 +283,8 @@ Two options per pair:
   about moisture, not about heating or cooling the house.
 - **Telegram alert when airing out helps** (with the first option on): "good time to air out" when
   the hint turns to yes, at most once every 3 hours per pair, and "you can close the windows" when it
-  turns to no after one of those. Nothing at power-on or during the night-mode hours.
+  turns to no after one of those, sent to the owner and the invited people. Nothing at power-on or
+  during the night-mode hours.
 
 `tools/govee_probe.py` lists your sensors and watches their readings from a computer (it reads
 the key from the `GOVEE_API_KEY` environment variable).
@@ -310,7 +311,8 @@ the key from the `GOVEE_API_KEY` environment variable).
    home, they tap it and **Start**, and they can send messages and schedules too (up to 4 people).
    `/members` lists them with a button to remove each one. With more than one person, the panel
    shows who sent each message. Alerts, the power-on notice, `/rain`, `/invite` and `/members`
-   stay with the owner; a ✅ Done reminder goes to whoever scheduled it.
+   stay with the owner (the airing-out alert goes to everyone, whoever is home can open the
+   windows); a ✅ Done reminder goes to whoever scheduled it.
 
 Commands work in any of the three languages; the bot's `/` menu shows them in the panel's
 language.

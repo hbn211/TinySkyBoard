@@ -1154,16 +1154,29 @@ static volatile tg_state_t s_state = TG_OFF;
 #define NOTE_QUEUE  6
 static QueueHandle_t s_notes;
 
-void telegram_notify(const char *text)
+#define NOTE_ALL '\x01'   // first byte of a queued note: send it to the members too
+
+static void queue_note(const char *text, bool all)
 {
     if (!s_notes || !g_cfg.tg_owner) {
         return;
     }
     char note[NOTE_MAX];
-    strlcpy(note, text, sizeof(note));
+    note[0] = all ? NOTE_ALL : ' ';
+    strlcpy(note + 1, text, sizeof(note) - 1);
     if (xQueueSend(s_notes, note, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "alert queue full, dropped: %s", note);
+        ESP_LOGW(TAG, "alert queue full, dropped: %s", note + 1);
     }
+}
+
+void telegram_notify(const char *text)
+{
+    queue_note(text, false);
+}
+
+void telegram_notify_all(const char *text)
+{
+    queue_note(text, true);
 }
 
 // ---------- reminders with a "Done" button ----------
@@ -1349,8 +1362,13 @@ static void telegram_task(void *arg)
     while (true) {
         char note[NOTE_MAX];
         while (announced && !fail_since && xQueueReceive(s_notes, note, 0) == pdTRUE) {
-            ESP_LOGI(TAG, "alert: %s", note);
-            reply(g_cfg.tg_owner, note);
+            ESP_LOGI(TAG, "alert: %s", note + 1);
+            reply(g_cfg.tg_owner, note + 1);
+            for (int m = 0; note[0] == NOTE_ALL && m < MEMBERS_MAX; m++) {
+                if (s_members[m].chat) {
+                    reply(s_members[m].chat, note + 1);
+                }
+            }
         }
         rem_ev_t ev;
         while (announced && !fail_since && xQueueReceive(s_rem_q, &ev, 0) == pdTRUE) {
