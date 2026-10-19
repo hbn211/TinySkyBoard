@@ -431,6 +431,18 @@ static void send_compare(httpd_req_t *req, const i18n_t *L)
             out(req, "</select>");
         }
         out(req, "</div>");
+        // B outdoors: airing-out hint; then the Telegram alert, only with the hint on
+        uint8_t opt = config_get_u8("cmp_opt");
+        char html[160];
+        snprintf(html, sizeof(html), "<label class=chk><input type=checkbox name=c%dout value=1%s "
+                 "onchange=\"this.form.c%dal.disabled=!this.checked\"> ", i, opt & GOVEE_CMP_OUT(i) ? " checked" : "", i);
+        out(req, html);
+        out(req, L->p_cmp_out);
+        snprintf(html, sizeof(html), "</label><label class=chk><input type=checkbox name=c%dal value=1%s%s> ", i,
+                 opt & GOVEE_CMP_ALERT(i) ? " checked" : "", opt & GOVEE_CMP_OUT(i) ? "" : " disabled");
+        out(req, html);
+        out(req, L->p_cmp_alert);
+        out(req, "</label>");
     }
 }
 
@@ -449,6 +461,19 @@ static void save_compare(const char *body)
         }
     }
     govee_cmp_save(cmp);
+    uint8_t opt = 0;
+    for (int i = 0; i < GOVEE_CMP_MAX; i++) {
+        char key[8], v[4];
+        snprintf(key, sizeof(key), "c%dout", i);
+        if (cmp[i].a[0] && form_value(body, key, v, sizeof(v))) {
+            opt |= GOVEE_CMP_OUT(i);
+            snprintf(key, sizeof(key), "c%dal", i);
+            if (form_value(body, key, v, sizeof(v))) {
+                opt |= GOVEE_CMP_ALERT(i);   // the alert only goes with the airing-out hint
+            }
+        }
+    }
+    config_set_u8("cmp_opt", opt);
 }
 
 // From/to time fields (minutes of the day); the value is always "HH:MM", the phone shows its own picker
@@ -1317,6 +1342,9 @@ static esp_err_t restore_post(httpd_req_t *req)
                 }
                 free(b);
             }
+        }
+        if (n && !cJSON_GetObjectItem(keys, "cmp_opt")) {
+            nvs_set_u8(nvs, "cmp_opt", 0);   // a file from before these options: off, not the board's current ones
         }
         nvs_commit(nvs);
         nvs_close(nvs);

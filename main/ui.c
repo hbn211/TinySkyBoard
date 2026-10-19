@@ -1,7 +1,9 @@
 #include "app.h"
+#include <math.h>
 #include "board.h"
 #include "config.h"
 #include "i18n.h"
+#include "psychro.h"
 #include "schedule.h"
 #include "emoji/emoji.h"
 #include "src/widgets/label/lv_label_private.h"   // label offset: is a rolling text back at the top?
@@ -39,6 +41,9 @@ static int s_msg_s = CYCLE_DEFAULT_S;
 
 // message text area: 36 px title on top, 22 px footer at the bottom
 #define MSG_TOP        36
+#define COLOR_DEW      lv_color_hex(0x80deea)   // dew point: the water in the air
+#define COLOR_WETTER   lv_color_hex(0x4dd0e1)   // comparison: A holds more water than B
+#define COLOR_DRIER    lv_color_hex(0xd7b98e)   // A holds less
 #define MSG_TOP_TALL   52   // portrait: the date/time goes on a second line under the title
 #define MSG_BOTTOM     22
 
@@ -1027,6 +1032,19 @@ static void render_sensors(void)
                 lv_obj_set_pos(hum, 0, single ? 136 : 70);
             }
         }
+        // dew point: the water actually in the air (humidity alone depends on the temperature).
+        // Alone on the screen a full line; two cards share it: short, on the humidity's line
+        if (!isnan(g->dew_c)) {
+            lv_obj_t *dew = label(c, single ? &font_pt_14 : &font_pt_12, COLOR_DEW);
+            label_fmt(dew, single ? T->sens_dew_fmt : T->sens_dew_short_fmt, temp_unit(g->dew_c));
+            if (single && landscape) {
+                lv_obj_align(dew, LV_ALIGN_TOP_RIGHT, 0, 62);
+            } else if (single) {
+                lv_obj_set_pos(dew, 0, 164);
+            } else {
+                lv_obj_align(dew, LV_ALIGN_TOP_RIGHT, 0, 72);
+            }
+        }
     }
 }
 
@@ -1547,7 +1565,8 @@ void ui_set_work(const work_wx_t *w)
 // ---------- sensor comparisons ----------
 
 // The k-th comparison whose two sensors are on the screen now; false if there's none
-static bool cmp_pair(int k, const govee_sensor_t **a, const govee_sensor_t **b)
+// k-th pair whose two sensors are on the screen; slot = its place on the setup page (options, hint)
+static bool cmp_pair_slot(int k, const govee_sensor_t **a, const govee_sensor_t **b, int *slot)
 {
     for (int i = 0; i < GOVEE_CMP_MAX; i++) {
         const govee_sensor_t *ga = NULL, *gb = NULL;
@@ -1562,10 +1581,17 @@ static bool cmp_pair(int k, const govee_sensor_t **a, const govee_sensor_t **b)
         if (ga && gb && k-- == 0) {
             *a = ga;
             *b = gb;
+            *slot = i;
             return true;
         }
     }
     return false;
+}
+
+static bool cmp_pair(int k, const govee_sensor_t **a, const govee_sensor_t **b)
+{
+    int slot;
+    return cmp_pair_slot(k, a, b, &slot);
 }
 
 static int cmp_pages(void)
@@ -1578,8 +1604,8 @@ static int cmp_pages(void)
     return n;
 }
 
-// One sensor's card: name on top; landscape (tall card): temperature in the middle, humidity at the
-// bottom; portrait (wide card): temperature and humidity side by side below the name
+// One sensor's card: name on top, then temperature, humidity and dew point. Tall (landscape): one
+// under the other; wide (portrait): temperature on the left, humidity and dew point on the right
 static void cmp_side(lv_obj_t *parent, int x, int y, int w, int h, const govee_sensor_t *g, bool tall)
 {
     lv_obj_t *c = card(parent, x, y, w, h);
@@ -1588,28 +1614,60 @@ static void cmp_side(lv_obj_t *parent, int x, int y, int w, int h, const govee_s
     lv_label_set_text(n, g->name);
     lv_obj_t *t = label(c, &font_pt_28, lv_color_white());
     label_fmt(t, "%.1f" DEG, temp_unit(g->temp_c));
-    lv_obj_t *hu = NULL;
+    lv_obj_t *hu = NULL, *dw = NULL;
     if (g->humidity >= 0) {
-        hu = label(c, &font_pt_14, COLOR_MUTED);
+        hu = label(c, &font_pt_14, lv_color_white());
         label_fmt(hu, "%.0f%%", g->humidity);
     }
+    if (!isnan(g->dew_c)) {
+        dw = label(c, &font_pt_12, COLOR_DEW);
+        label_fmt(dw, T->sens_dew_short_fmt, temp_unit(g->dew_c));
+    }
     if (tall) {
-        lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_pos(t, 0, 17);
         if (hu) {
-            lv_obj_align(hu, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+            lv_obj_set_pos(hu, 0, 50);
+        }
+        if (dw) {
+            lv_obj_align(dw, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         }
     } else {
         lv_obj_align(t, LV_ALIGN_BOTTOM_LEFT, 0, 4);
         if (hu) {
-            lv_obj_align(hu, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+            lv_obj_align(hu, LV_ALIGN_TOP_RIGHT, 0, 22);
         }
+        if (dw) {
+            lv_obj_align(dw, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+        }
+    }
+}
+
+// a difference under the temperature one: small label and a readable value. stacked = label above
+// the value (narrow middle column); otherwise side by side
+static void cmp_row(int cx, int y, bool stacked, const char *name, const char *value, lv_color_t color)
+{
+    lv_obj_t *n = label(s_cmp_panel, &font_pt_12, COLOR_MUTED);
+    lv_label_set_text(n, name);
+    lv_obj_t *v = label(s_cmp_panel, &font_pt_20, color);
+    lv_label_set_text(v, value);
+    lv_obj_update_layout(n);
+    lv_obj_update_layout(v);
+    int nw = lv_obj_get_width(n), vw = lv_obj_get_width(v);
+    if (stacked) {
+        lv_obj_set_pos(n, cx - nw / 2, y);
+        lv_obj_set_pos(v, cx - vw / 2, y + 13);
+    } else {
+        int x0 = cx - (nw + 6 + vw) / 2;
+        lv_obj_set_pos(n, x0, y + 6);
+        lv_obj_set_pos(v, x0 + nw + 6, y);
     }
 }
 
 static void render_cmp(void)
 {
     const govee_sensor_t *a, *b;
-    if (!s_cmp_panel || s_cmp < 0 || !cmp_pair(s_cmp, &a, &b)) {
+    int slot;
+    if (!s_cmp_panel || s_cmp < 0 || !cmp_pair_slot(s_cmp, &a, &b, &slot)) {
         return;
     }
     lv_obj_clean(s_cmp_panel);
@@ -1633,23 +1691,40 @@ static void render_cmp(void)
     lv_obj_set_style_bg_color(bar, COLOR_ACCENT, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_40, 0);
 
-    // the sensors first, the difference on top of them (never hidden under a card)
-    int mid_w;
+    int vent = govee_vent(slot);   // B outdoors: airing-out hint in a line at the bottom
+    int vent_h = vent >= 0 ? 24 : 0;
+
+    // differences in the panel's unit: a difference of temperatures is only scaled (x1.8), never offset
+    float k = s_fahrenheit ? 9.0f / 5.0f : 1.0f;
+    float d = (a->temp_c - b->temp_c) * k;
+    bool same = d > -0.15f && d < 0.15f;
+    char hum[16] = "", dew[16] = "";
+    if (a->humidity >= 0 && b->humidity >= 0) {
+        snprintf(hum, sizeof(hum), "%+.0f%%", a->humidity - b->humidity);
+    }
+    float dd = 0;
+    bool has_dew = !isnan(a->dew_c) && !isnan(b->dew_c);
+    if (has_dew) {
+        dd = (a->dew_c - b->dew_c) * k;
+        snprintf(dew, sizeof(dew), "%+.1f" DEG, dd);
+    }
+    // more water in A: cyan; less: sand (not the temperature's orange/blue)
+    lv_color_t dew_color = dd > 0.5f * k ? COLOR_WETTER : dd < -0.5f * k ? COLOR_DRIER : lv_color_white();
+
+    int cy;   // top of the middle block
+    bool stacked = landscape;
     if (landscape) {
-        int cw = 100, ch = h - 46;
+        int cw = 100, ch = h - 46 - vent_h;
         cmp_side(s_cmp_panel, 10, 40, cw, ch, a, true);
         cmp_side(s_cmp_panel, w - 10 - cw, 40, cw, ch, b, true);
-        mid_w = w - 2 * (10 + cw) - 8;
+        cy = 36;
     } else {
         int cw = w - 20, ch = 76;
         cmp_side(s_cmp_panel, 10, 40, cw, ch, a, false);
-        cmp_side(s_cmp_panel, 10, h - 8 - ch, cw, ch, b, false);
-        mid_w = w - 20;
+        cmp_side(s_cmp_panel, 10, h - 8 - ch - vent_h, cw, ch, b, false);
+        cy = 40 + ch + ((h - 8 - ch - vent_h) - (40 + ch) - 88) / 2;
     }
 
-    // difference in the panel's unit: warmer orange, cooler blue
-    float d = (a->temp_c - b->temp_c) * (s_fahrenheit ? 9.0f / 5.0f : 1.0f);
-    bool same = d > -0.15f && d < 0.15f;
     lv_obj_t *dl = label(s_cmp_panel, &font_pt_28, same ? lv_color_white() :
                                                    d > 0 ? lv_color_hex(0xff8a65) : COLOR_ACCENT);
     if (same) {
@@ -1657,24 +1732,23 @@ static void render_cmp(void)
     } else {
         label_fmt(dl, "%+.1f" DEG, d);
     }
-    lv_obj_t *dh = label(s_cmp_panel, &font_pt_12, COLOR_MUTED);
-    lv_label_set_long_mode(dh, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(dh, mid_w);
-    lv_obj_set_style_text_align(dh, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_t *dv = label(s_cmp_panel, &font_pt_20, lv_color_white());   // humidity difference, readable
-    lv_label_set_text(dv, "");
-    if (same) {
-        lv_label_set_text(dh, T->cmp_same);
-    } else if (a->humidity >= 0 && b->humidity >= 0) {
-        lv_label_set_text(dh, T->cmp_hum);
-        label_fmt(dv, "%+.0f%%", a->humidity - b->humidity);
-    } else {
-        lv_label_set_text(dh, "");
+    lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, cy);
+    int y = cy + (landscape ? 34 : 34);
+    if (hum[0]) {
+        cmp_row(w / 2, y, stacked, T->cmp_hum, hum, lv_color_white());
+        y += landscape ? 36 : 28;
     }
-    int cy = landscape ? 40 + (h - 46) / 2 : (40 + 76 + (h - 8 - 76)) / 2;   // middle between the cards
-    lv_obj_align(dl, LV_ALIGN_TOP_MID, 0, cy - (landscape ? 34 : 30));
-    lv_obj_align(dh, LV_ALIGN_TOP_MID, 0, cy + (landscape ? 0 : 2));
-    lv_obj_align(dv, LV_ALIGN_TOP_MID, 0, cy + (landscape ? 16 : 16));
+    if (has_dew) {
+        cmp_row(w / 2, y, stacked, T->cmp_dew, dew, dew_color);
+    }
+
+    if (vent >= 0) {
+        lv_obj_t *vl = label(s_cmp_panel, &font_pt_14, vent == PSY_VENT_YES ? lv_color_hex(0x81c784) :
+                                                       vent == PSY_VENT_NO ? lv_color_hex(0xe57373) : COLOR_MUTED);
+        label_fmt(vl, "%s %s", vent == PSY_VENT_YES ? LV_SYMBOL_OK : vent == PSY_VENT_NO ? LV_SYMBOL_CLOSE : LV_SYMBOL_MINUS,
+                  vent == PSY_VENT_YES ? T->vent_yes : vent == PSY_VENT_NO ? T->vent_no : T->vent_either);
+        lv_obj_align(vl, LV_ALIGN_BOTTOM_MID, 0, -6);
+    }
 }
 
 static void show_cmp(int k)
@@ -2168,6 +2242,14 @@ void ui_delete_selected(void)
 static bool night_hours(const struct tm *tm)
 {
     return in_window(tm->tm_hour * 60 + tm->tm_min, s_night_from, s_night_to);
+}
+
+bool ui_night_hours_now(void)
+{
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    return s_night_on && tm.tm_year >= (2024 - 1900) && night_hours(&tm);
 }
 
 // Landscape: "03:47" across the screen and the date below. Portrait: hours above minutes.

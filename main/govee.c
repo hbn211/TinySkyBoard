@@ -2,8 +2,10 @@
 #include "app.h"
 #include "config.h"
 #include "i18n.h"
+#include "psychro.h"
 
 #include <string.h>
+#include <math.h>
 #include <stdio.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
@@ -59,6 +61,16 @@ static volatile int s_http;   // last API answer, for the status card
 static govee_alert_t s_alerts[GOVEE_MAX];
 static int s_nalerts;
 static bool s_alert_silent;   // "a sensor stopped sending" alert (setup page)
+
+#define VENT_ALERT_GAP_S  (3 * 3600)   // at most one "good time to air out" per pair in this time
+static govee_cmp_t s_cmps[GOVEE_CMP_MAX];
+static uint8_t s_cmp_opt;     // GOVEE_CMP_OUT / GOVEE_CMP_ALERT bits
+static struct {
+    bool known;               // evaluated once (the first evaluation only sets the state, no alert)
+    psy_vent_t state;
+    bool yes_sent;            // a "good time to air out" went out since the last "you can close"
+    int64_t yes_at;           // monotonic
+} s_vent[GOVEE_CMP_MAX];
 
 static int64_t mono_s(void)
 {
@@ -317,6 +329,8 @@ static void check_alerts(int i, float temp_c, float hum)
     }
 }
 
+static void check_vent(int i);
+
 static void poll_sensor(int i)
 {
     static uint32_t req_id;
@@ -364,6 +378,7 @@ static void poll_sensor(int i)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     govee_sensor_t *s = &s_sensors[i];
     bool changed = t->has_value && (temp_c != s->temp_c || (has_h && hum != s->humidity));
+    bool first = !t->has_value;
     t->online = online;
     if (!t->has_value || changed) {
         if (changed) {
@@ -371,6 +386,7 @@ static void poll_sensor(int i)
         }
         s->temp_c = temp_c;
         s->humidity = hum;
+        s->dew_c = has_h && hum >= 0 ? psy_dew_point_c(temp_c, hum) : NAN;
         t->has_value = true;
         t->alive_at = mono;
         add_reading(s, t, temp_c, now);
@@ -379,6 +395,9 @@ static void poll_sensor(int i)
     xSemaphoreGive(s_lock);
     if (changed) {
         check_alerts(i, temp_c, hum);   // only new readings: the first one may be hours old
+    }
+    if (changed || first) {
+        check_vent(i);
     }
 
     if (changed) {
@@ -458,8 +477,76 @@ static void govee_task(void *arg)
     }
 }
 
+// ---------- airing out: compare the water in the air inside (A) and outside (B) ----------
+
+static int sensor_index(const char *device)
+{
+    for (int i = 0; i < s_n; i++) {
+        if (device[0] && strcmp(s_sensors[i].device, device) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// a new reading from sensor i: update the hint of the pairs it belongs to (outdoor option on)
+static void check_vent(int i)
+{
+    for (int k = 0; k < GOVEE_CMP_MAX; k++) {
+        if (!(s_cmp_opt & GOVEE_CMP_OUT(k)) ||
+            (strcmp(s_cmps[k].a, s_sensors[i].device) != 0 && strcmp(s_cmps[k].b, s_sensors[i].device) != 0)) {
+            continue;
+        }
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        int a = sensor_index(s_cmps[k].a), b = sensor_index(s_cmps[k].b);
+        bool ok = a >= 0 && b >= 0 && s_track[a].has_value && s_track[b].has_value &&
+                  !isnan(s_sensors[a].dew_c) && !isnan(s_sensors[b].dew_c);
+        float din = ok ? s_sensors[a].dew_c : 0, dout = ok ? s_sensors[b].dew_c : 0;
+        char na[32], nb[32];
+        if (ok) {
+            strlcpy(na, s_sensors[a].name, sizeof(na));
+            strlcpy(nb, s_sensors[b].name, sizeof(nb));
+        }
+        xSemaphoreGive(s_lock);
+        if (!ok) {
+            continue;
+        }
+        psy_vent_t prev = s_vent[k].state, next = psy_vent_next(prev, din - dout);
+        bool first = !s_vent[k].known;
+        s_vent[k].known = true;
+        s_vent[k].state = next;
+        s_version++;
+        if (first || next == prev || !(s_cmp_opt & GOVEE_CMP_ALERT(k)) || ui_night_hours_now()) {
+            continue;   // after power-on only the state; at night nothing (dropped, not queued)
+        }
+        char msg[220], vin[16], vout[16];
+        if (next == PSY_VENT_YES && (!s_vent[k].yes_at || mono_s() - s_vent[k].yes_at >= VENT_ALERT_GAP_S)) {
+            fmt_temp(vin, sizeof(vin), din);
+            fmt_temp(vout, sizeof(vout), dout);
+            snprintf(msg, sizeof(msg), T->al_vent_yes_fmt, na, nb, vin, vout);
+            telegram_notify(msg);
+            s_vent[k].yes_sent = true;
+            s_vent[k].yes_at = mono_s();
+        } else if (next == PSY_VENT_NO && s_vent[k].yes_sent) {
+            snprintf(msg, sizeof(msg), T->al_vent_close_fmt, na, nb);
+            telegram_notify(msg);
+            s_vent[k].yes_sent = false;
+        }
+    }
+}
+
+int govee_vent(int pair)
+{
+    if (pair < 0 || pair >= GOVEE_CMP_MAX || !(s_cmp_opt & GOVEE_CMP_OUT(pair)) || !s_vent[pair].known) {
+        return -1;
+    }
+    return s_vent[pair].state;
+}
+
 void govee_start(void)
 {
+    govee_cmp_load(s_cmps);
+    s_cmp_opt = config_get_u8("cmp_opt");
     s_interval_s = config_get_u8_def("govee_int", GOVEE_DEFAULT_MIN) * 60;
     s_nalerts = govee_alerts_load(s_alerts, GOVEE_MAX);
     s_alert_silent = config_get_u8("galert_q");

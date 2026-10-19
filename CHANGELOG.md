@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0 — 2026-10-19
+
+- **Dew point** on every Govee sensor card: the water actually in the air, which relative humidity
+  alone hides when temperatures differ.
+- **Comparisons**: the temperature difference stays in the middle, now with the humidity and the dew
+  point differences under it (cyan when A holds more water, sand when less) and each sensor's dew
+  point on its card.
+- **Airing out**: per comparison, "sensor B is outdoors" adds *Air out: yes / no / either* (dew point
+  inside vs outside, 3 °C margin with hysteresis), and an optional Telegram alert when airing out
+  helps and when you can close the windows (at most every 3 h, never at power-on or at night).
+- The configuration backup carries the new options; an older file loads with them off.
+
 ## 1.5.2 — 2026-10-19
 
 ### Fixes

@@ -82,6 +82,7 @@ void ui_lan_setup_close(void);
 bool ui_lan_setup_active(void);
 bool ui_night_active(void);
 void ui_night_toggle(void);
+bool ui_night_hours_now(void);   // within the night-mode hours set on the setup page (any task)
 void ui_sched_open(void);              // hold on the schedule card: browse the schedules
 void ui_zone_progress(int held_ms);    // holding on a schedule: nothing / delete today / delete all / nothing
 void ui_zone_release(int held_ms);   // hold on the night-mode card: on now / off for the rest of tonight   // night clock on screen (a click only wakes the panel)
@@ -162,6 +163,7 @@ typedef struct {
     char device[24];        // Govee device ID
     float temp_c;
     float humidity;         // -1 = the sensor has none
+    float dew_c;            // dew point (°C) from temperature + humidity; NAN without humidity
     time_t changed_at;      // when a new reading was seen; 0 = none since power-on yet (not shown)
     float day_min, day_max; // today's range (seen by the panel since midnight or since it powered on)
     int trend;              // temperature over the last hour: 1 rising, -1 falling, 0 steady
@@ -204,6 +206,11 @@ typedef struct {
 } govee_cmp_t;
 int govee_cmp_load(govee_cmp_t *out);                  // returns how many are set
 void govee_cmp_save(const govee_cmp_t *in);            // GOVEE_CMP_MAX entries
+// per comparison options, NVS u8 "cmp_opt" (kept apart from the "cmp" blob so saved pairs keep their size):
+// B is outdoors (show the airing-out hint), and a Telegram alert when airing out helps
+#define GOVEE_CMP_OUT(i)    (1u << (2 * (i)))
+#define GOVEE_CMP_ALERT(i)  (2u << (2 * (i)))
+int govee_vent(int pair);   // airing-out hint of comparison slot "pair": psy_vent_t, or -1 (off / no readings yet)
 
 // portal.c — setup mode: own Wi-Fi + web page
 void portal_start(void);

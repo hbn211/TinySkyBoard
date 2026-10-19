@@ -96,7 +96,13 @@ typedef struct {
     const char *work_chart;         // "Next 12 h: rain % and temperature"
     const char *cmp_title;          // sensor comparison page
     const char *cmp_hum;            // comparison: the word above the humidity difference
-    const char *cmp_same;           // "same temperature"
+    const char *cmp_dew;            // comparison: the word above the dew point difference
+    const char *sens_dew_fmt;       // sensor card alone: "dew point 11.6°"
+    const char *sens_dew_short_fmt; // two cards / comparison: "dew 11.6°"
+    const char *vent_yes, *vent_no, *vent_either;   // airing-out hint (comparison, B outdoors)
+    const char *al_vent_yes_fmt;    // %s A, %s B, %s dew point inside, %s outside
+    const char *al_vent_close_fmt;  // %s A, %s B
+    const char *p_cmp_out, *p_cmp_alert;   // setup page, per comparison
     const char *sens_title;         // Govee sensors screen
     const char *sens_updated_fmt;   // %s = time of the last new reading
     const char *sens_wait;

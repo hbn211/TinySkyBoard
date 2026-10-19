@@ -21,7 +21,7 @@ itself: no reflashing when you move or change networks.
 > pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
 > press **RESET**. The same page updates a board later and keeps its settings.
 
-**Version 1.5.2** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.6.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -265,10 +265,25 @@ humidity) inside the range, so a value hovering at the limit doesn't flood you. 
 are checked. A checkbox adds a message when a sensor stops sending (the same moment it leaves the
 screen) and when it comes back. Alerts need the Telegram bot.
 
+**Dew point.** Each sensor card also shows the dew point, computed from temperature and
+humidity (Magnus formula, `main/psychro.h`). Relative humidity misleads when temperatures differ:
+outside at 3 °C / 90 % "looks" damp but holds far less water than a room at 21 °C / 55 % — dew
+point 1.5 °C against 11.6 °C; heated to 21 °C, that outside air would be at ~27 %.
+
 **Comparisons.** Under **Compare sensors** on the setup page, pick two sensors (A × B), up to two
 pairs — say living room × outside. Each pair gets a page after the sensor pages with the
-difference A − B in the middle (orange when A is warmer, blue when cooler, and the humidity
-difference) and both readings on the sides. It shows only while both sensors have fresh readings.
+difference A − B in the middle (orange when A is warmer, blue when cooler), and below it the
+humidity and dew point differences (cyan when A holds more water, sand when less); each side shows
+its reading and dew point. It shows only while both sensors have fresh readings.
+
+Two options per pair:
+- **Sensor B is outdoors** adds **Air out: yes / no / either** at the bottom: yes once the dew point
+  inside is 3 °C above outside (until it drops under 2.5 °C), no at 1 °C or less (until it rises over
+  1.5 °C). The margins cover the sensors' ±3 % humidity, so the hint doesn't flicker. It only talks
+  about moisture, not about heating or cooling the house.
+- **Telegram alert when airing out helps** (with the first option on): "good time to air out" when
+  the hint turns to yes, at most once every 3 hours per pair, and "you can close the windows" when it
+  turns to no after one of those. Nothing at power-on or during the night-mode hours.
 
 `tools/govee_probe.py` lists your sensors and watches their readings from a computer (it reads
 the key from the `GOVEE_API_KEY` environment variable).
@@ -346,6 +361,7 @@ main/
   net.c           Wi-Fi, NTP, Open-Meteo weather (main and other cities), geocoding, HTTPS helper
   telegram.c      bot: messages, commands, /schedule assistant, uptime notices
   govee.c         Govee thermometers: polling in sync with the uploads, trend, day range
+  psychro.h       dew point and the airing-out hint (header only)
   schedule.c/.h   active messages and schedules
   weather_icon.c  animated weather icon (Twemoji sun/moon/cloud + LVGL drops, flakes, lightning)
   dimmer.c        day/night brightness from sunrise/sunset
