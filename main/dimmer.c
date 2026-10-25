@@ -73,6 +73,7 @@ void dimmer_start(bool follow_sun)
     s_led = config_get_u8_def("led_lvl", DIM_DEFAULT_LED);
     s_led_night = config_get_u8_def("led_night", DIM_DEFAULT_LED_NIGHT);
     led_set_alert_level(config_get_u8_def("led_alert", DIM_DEFAULT_ALERT), false);
+    led_load_styles();
     apply();
     if (follow_sun) {
         xTaskCreate(dimmer_task, "dimmer", 3072, NULL, 2, NULL);

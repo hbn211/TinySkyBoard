@@ -61,7 +61,9 @@ the setup page and in the bot's `/status` reply.
 - **Scheduled messages** (`/schedule`): a step-by-step assistant with quick-reply buttons —
   time, duration and repeat (once, every day, Mon–Fri, weekends). Optionally the reminder also
   arrives in Telegram when it starts, with a **✅ Done** button that clears it from the screen
-  (handy for "take the medicine"); deleting it on the panel updates that button too.
+  (handy for "take the medicine"); deleting it on the panel updates that button too. With other
+  people on the bot, it goes either to whoever scheduled it or to everyone: whoever taps ✅ Done
+  clears it, and the others' buttons say who did.
   They can also be created, edited and deleted on a **Scheduled messages** page, linked from the
   setup page when it's opened over your home network, and browsed or deleted on the panel itself.
 - **Rain alert** (`/rain`): a Telegram message when rain becomes likely in the next hours.
@@ -301,8 +303,8 @@ the key from the `GOVEE_API_KEY` environment variable).
 | Solid blue | Connecting to Wi-Fi |
 | Solid green | Connected, fetching the weather |
 | Weather color | All good: yellow clear sky, gray cloudy, blue rain, purple storm… |
-| Breathing red | A scheduled message (reminder) unread during night-mode hours |
-| Blinking white | Unread messages — stops once you open them all with a quick press (or delete them). Its brightness is a separate setting (0% = no blink). |
+| Breathing red | A scheduled message (reminder) unread during night-mode hours — color and mode (blink, breathe, solid) on the setup page |
+| Blinking white | Unread messages — stops once you open them all with a quick press (or delete them). Color and mode (blink, breathe, solid) are set on the setup page, with a live preview; its brightness is a separate setting (0% = no blink). |
 | Solid red | Wi-Fi is down (reconnects by itself) |
 | Solid orange | Setup mode |
 

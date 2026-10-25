@@ -156,6 +156,7 @@ static const char PAGE_HEAD[] =
     "label.chk{display:flex;align-items:center;gap:10px;color:#e8ecf4}"
     "label.chk input{width:22px;height:22px;flex:none;accent-color:#4fc3f7}"
     ".hrs{display:flex;align-items:center;gap:8px}.hrs span{color:#8a94a8}.hrs input{color-scheme:dark}"
+    ".hrs input.clr{width:56px;height:40px;padding:2px;flex:none}.hrs select{flex:1}"
     ".days{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}.days label{display:flex;align-items:center;"
     "gap:4px;margin:0;color:#e8ecf4}.days input{width:18px;height:18px;accent-color:#4fc3f7}"
     ".al{margin:10px 0}.al b{display:block;margin-bottom:4px;font-weight:500}"
@@ -221,6 +222,36 @@ static void send_head(httpd_req_t *req, uint8_t lang, const char *self)
 }
 
 // Brightness slider; moving it applies to the board right away (/preview), before saving
+// Notification LED: color and mode for unread messages and for a reminder at night; a change shows on
+// the LED for a few seconds (/preview?nlc=rrggbb&nlm=mode)
+static void send_nled(httpd_req_t *req, const i18n_t *L)
+{
+    static const char *const KEYS[][2] = {{"nled_c", "nled_m"}, {"nled_nc", "nled_nm"}};
+    const char *labels[] = {L->p_nled_day, L->p_nled_night};
+    const char *defs[] = {"#ffffff", "#ff0000"};
+    const int def_mode[] = {LED_BLINK, LED_BREATHE};
+    for (int k = 0; k < 2; k++) {
+        char c[8];
+        config_get_str(KEYS[k][0], c, sizeof(c));
+        if (led_parse_rgb(c, 0x1000000) == 0x1000000) {
+            strlcpy(c, defs[k], sizeof(c));
+        }
+        int mode = config_get_u8_def(KEYS[k][1], def_mode[k]) % 3;
+        char html[256];
+        snprintf(html, sizeof(html), "<label>%s</label><div class=hrs><input type=color name=%s value=%s "
+                 "class=clr onchange=nl(this)><select name=%s onchange=nl(this)>", labels[k], KEYS[k][0], c, KEYS[k][1]);
+        out(req, html);
+        for (int m = 0; m < 3; m++) {
+            snprintf(html, sizeof(html), "<option value=%d%s>", m, m == mode ? " selected" : "");
+            out(req, html);
+            out(req, L->p_nled_modes[m]);
+        }
+        out(req, "</select></div>");
+    }
+    out(req, "<script>function nl(e){var d=e.parentNode;fetch('/preview?nlc='+d.children[0].value.slice(1)+"
+             "'&nlm='+d.children[1].value)}</script>");
+}
+
 static void send_slider(httpd_req_t *req, const char *name, const char *label, int min, int value)
 {
     char html[400];
@@ -613,6 +644,11 @@ static esp_err_t preview_get(httpd_req_t *req)
                 ui_rebuild();
                 lvgl_port_unlock();
             }
+        } else if (httpd_query_key_value(query, "nlc", val, sizeof(val)) == ESP_OK) {
+            char hex[10] = "#", mode[4] = "0";
+            strlcat(hex, val, sizeof(hex));
+            httpd_query_key_value(query, "nlm", mode, sizeof(mode));
+            led_preview_style(led_parse_rgb(hex, 0xffffff), atoi(mode));
         } else if (httpd_query_key_value(query, "led_alert", val, sizeof(val)) == ESP_OK) {
             led_set_alert_level(atoi(val), true);   // flashes white so you see the level
         } else if (httpd_query_key_value(query, "led_lvl", val, sizeof(val)) == ESP_OK ||
@@ -719,6 +755,7 @@ static esp_err_t root_get(httpd_req_t *req)
     send_slider(req, "led_lvl", L->p_bright_led, 0, config_get_u8_def("led_lvl", DIM_DEFAULT_LED));
     send_slider(req, "led_night", L->p_bright_led_night, 0, config_get_u8_def("led_night", DIM_DEFAULT_LED_NIGHT));
     send_slider(req, "led_alert", L->p_bright_alert, 0, config_get_u8_def("led_alert", DIM_DEFAULT_ALERT));
+    send_nled(req, L);
     out(req, "<small>");
     out(req, L->p_bright_hint);
     out(req, "</small>");
@@ -902,6 +939,16 @@ static esp_err_t save_post(httpd_req_t *req)
         config_set_u8("govee_int", v < 1 ? 1 : v > 60 ? 60 : v);
     }
     config_set_u8("wx_on", form_value(body, "wx_on", num, sizeof(num)));   // unchecked boxes aren't sent
+    static const char *const NLED[][2] = {{"nled_c", "nled_m"}, {"nled_nc", "nled_nm"}};
+    for (int k = 0; k < 2; k++) {
+        char c[10];
+        if (form_value(body, NLED[k][0], c, sizeof(c)) && led_parse_rgb(c, 0x1000000) != 0x1000000) {
+            config_set_str(NLED[k][0], c);
+        }
+        if (form_value(body, NLED[k][1], num, sizeof(num))) {
+            config_set_u8(NLED[k][1], atoi(num) % 3);
+        }
+    }
     config_set_u8("night_on", form_value(body, "night_on", num, sizeof(num)));
     save_alerts(body);
     save_compare(body);
@@ -1020,11 +1067,18 @@ static void send_sched_form(httpd_req_t *req, const i18n_t *L, const sched_t *s)
         out(req, html);
     }
     out(req, "</select></div>");
-    if (g_cfg.tg_token[0]) {
-        out(req, s->flags & SCHED_F_TG_DONE ? "<label class=chk><input type=checkbox name=tg value=1 checked> "
-                                            : "<label class=chk><input type=checkbox name=tg value=1> ");
+    if (g_cfg.tg_token[0]) {   // Telegram with a "Done" button: no / whoever scheduled it / everyone on the bot
+        int cur = !(s->flags & SCHED_F_TG_DONE) ? 0 : s->flags & SCHED_F_TG_ALL ? 2 : 1;
+        const char *opts[] = {L->p_sched_tg_none, L->p_sched_tg_me, L->p_sched_tg_all};
+        out(req, "<label>");
         out(req, L->p_sched_tg);
-        out(req, "</label>");
+        out(req, "</label><select name=tg>");
+        for (int k = 0; k < 3; k++) {
+            snprintf(html, sizeof(html), "<option value=%d%s>", k, k == cur ? " selected" : "");
+            out(req, html);
+            out(req, opts[k]);
+        }
+        out(req, "</select>");
     }
     out(req, "<div class=btns><button name=act value=save>");
     out(req, s->id ? L->p_sched_save : L->p_sched_add);
@@ -1162,7 +1216,7 @@ static esp_err_t agenda_post(httpd_req_t *req)
             s.dur_min = 1440;   // a daily repeat lasts at most one day
         }
         form_value(body, "tg", num, sizeof(num));
-        s.flags = num[0] == '1' ? SCHED_F_TG_DONE : 0;
+        s.flags = num[0] == '1' ? SCHED_F_TG_DONE : num[0] == '2' ? SCHED_F_TG_DONE | SCHED_F_TG_ALL : 0;
         form_value(body, "time", hm, sizeof(hm));
         int t = parse_hhmm(hm);
         if (t < 0) {

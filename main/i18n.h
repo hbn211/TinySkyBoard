@@ -115,6 +115,7 @@ typedef struct {
     const char *p_sched_link, *p_sched_title, *p_sched_new, *p_sched_text, *p_sched_dur, *p_sched_tg;
     const char *p_sched_save, *p_sched_add, *p_sched_del, *p_sched_del_q, *p_sched_saved, *p_sched_deleted;
     const char *p_sched_long;
+    const char *p_nled_day, *p_nled_night, *p_nled_modes[3];   // notification LED: blink, breathe, solid
     const char *p_backup, *p_backup_get, *p_backup_hint, *p_restore, *p_restore_bad, *p_restore_ok;
     const char *p_sec[5];           // setup page sections: place, display, brightness, rotation, integrations
     const char *p_network;
@@ -233,6 +234,9 @@ typedef struct {
     const char *btn_yes, *btn_no;
     const char *sch_ask_tg_done;     // /agendar: also send it to Telegram with a "Done" button?
     const char *rem_done_btn;        // the button under a reminder
+    const char *rem_done_by_fmt;     // the other people's copies: "✅ Done by %s %s" (name, time)
+    const char *sch_ask_tg_who, *btn_only_me, *btn_everyone;   // /schedule: the reminder to whom?
+    const char *p_sched_tg_none, *p_sched_tg_me, *p_sched_tg_all;   // scheduled messages page
     const char *rem_done_fmt;        // after the tap: "✅ Done 14:05"
     const char *rem_done_panel_fmt;  // deleted on the panel instead
     const char *rem_gone;            // the tap came after it left the screen

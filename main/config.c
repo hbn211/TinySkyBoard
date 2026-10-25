@@ -173,6 +173,29 @@ uint8_t config_get_u8_def(const char *key, uint8_t def)
     return val;
 }
 
+void config_get_str(const char *key, char *out, size_t size)
+{
+    out[0] = '\0';
+    nvs_handle_t nvs;
+    if (nvs_open(NS, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = size;
+        if (nvs_get_str(nvs, key, out, &len) != ESP_OK) {
+            out[0] = '\0';
+        }
+        nvs_close(nvs);
+    }
+}
+
+void config_set_str(const char *key, const char *val)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NS, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_str(nvs, key, val);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
 void config_set_u8(const char *key, uint8_t val)
 {
     nvs_handle_t nvs;

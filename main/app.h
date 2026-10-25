@@ -105,6 +105,11 @@ void led_set_urgent(bool on);   // unread reminder at night: red breathing (brig
 void led_set_alert_level(uint8_t percent, bool preview);   // flash brightness; preview = show it now
 void led_solid(uint32_t rgb);
 void led_set_level(uint8_t percent);   // max brightness, 0 = off
+// notification look (setup page): NVS "nled_c"/"nled_m" unread messages, "nled_nc"/"nled_nm" reminder at night
+enum { LED_BLINK = 0, LED_BREATHE, LED_SOLID };
+void led_load_styles(void);
+void led_preview_style(uint32_t rgb, uint8_t mode);   // shows it for a few seconds
+uint32_t led_parse_rgb(const char *s, uint32_t def);  // "#rrggbb"
 
 // dimmer.c — screen/LED brightness by day and night (sunrise/sunset)
 #define DIM_DEFAULT_DAY    80

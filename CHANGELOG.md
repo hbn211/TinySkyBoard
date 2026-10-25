@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Scheduled messages with ✅ Done in Telegram can go to **everyone on the bot**, not only to whoever
+  scheduled it: `/schedule` asks "only me / everyone" when there are invited people, and the
+  scheduled messages page has a choice (don't send / whoever scheduled it / everyone). Whoever taps
+  Done clears it; the other copies say "✅ Done by Ana 14:05". `/list` marks these with 🔔👥.
+- **Notification LED**: color and mode (blink, breathe, solid) for unread messages and for a reminder
+  at night, on the setup page with a live preview on the LED. Defaults as before: white blink, red
+  breathing.
+
 ## 1.6.2 — 2026-10-19
 
 - Airing out: **"yes" only when the humidity inside is high** (60 % by default, adjustable on the

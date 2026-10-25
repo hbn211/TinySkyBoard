@@ -412,7 +412,8 @@ static void send_list(int64_t chat_id)
         const char *tag = st == SCHED_ON_SCREEN ? T->sch_on_now : st == SCHED_DISMISSED ? T->sch_dismissed :
                           st == SCHED_SKIPPED ? T->sch_skipped : NULL;
         o += snprintf(out + o, sizeof(out) - o, "\n%d. %s%s%s%s%s\n   \xE2\x80\x9C%s\xE2\x80\x9D\n", i + 1, line,
-                      list[i].flags & SCHED_F_TG_DONE ? " \xC2\xB7 \xF0\x9F\x94\x94" : "",   // " · 🔔"
+                      !(list[i].flags & SCHED_F_TG_DONE) ? "" : list[i].flags & SCHED_F_TG_ALL ? " \xC2\xB7 \xF0\x9F\x94\x94\xF0\x9F\x91\xA5"
+                                                                                               : " \xC2\xB7 \xF0\x9F\x94\x94",   // " · 🔔(👥)"
                       tag ? "  (" : "", tag ? tag : "", tag ? ")" : "", list[i].text);
     }
     reply(chat_id, out);
@@ -806,7 +807,7 @@ static bool try_join(int64_t chat_id, const cJSON *msg, const char *text)
 
 // ---------- /agendar assistant ----------
 
-typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT, W_TG_DONE } wizard_step_t;
+typedef enum { W_IDLE, W_TEXT, W_WHEN, W_DUR, W_REPEAT, W_TG_DONE, W_TG_WHO } wizard_step_t;
 
 static wizard_step_t s_step;
 static sched_t s_draft;
@@ -830,6 +831,12 @@ static void ask_repeat(int64_t chat_id)
     send_kb(chat_id, T->sch_ask_repeat, T->repeat, 4, 2);
 }
 
+static void ask_tg_who(int64_t chat_id)
+{
+    const char *const btns[] = {T->btn_only_me, T->btn_everyone};
+    send_kb(chat_id, T->sch_ask_tg_who, btns, 2, 2);
+}
+
 static void ask_tg_done(int64_t chat_id)
 {
     const char *const btns[] = {T->btn_yes, T->btn_no};
@@ -848,6 +855,19 @@ static int parse_yes_no(const char *text)
         }
     }
     return -1;
+}
+
+static void wizard_finish(int64_t chat_id)
+{
+    s_step = W_IDLE;
+    if (!sched_add(&s_draft)) {
+        reply(chat_id, T->sch_full);
+        return;
+    }
+    char line[80], out[SCHED_TEXT + 140];
+    fmt_entry(&s_draft, line, sizeof(line));
+    snprintf(out, sizeof(out), "%s\n%s\n\xE2\x80\x9C%s\xE2\x80\x9D", T->sch_done, line, s_draft.text);
+    reply(chat_id, out);
 }
 
 static void wizard_input(int64_t chat_id, const char *text)
@@ -925,15 +945,28 @@ static void wizard_input(int64_t chat_id, const char *text)
             return;
         }
         s_draft.flags = yes ? SCHED_F_TG_DONE : 0;
-        s_step = W_IDLE;
-        if (!sched_add(&s_draft)) {
-            reply(chat_id, T->sch_full);
+        if (yes && members_count()) {
+            s_step = W_TG_WHO;   // more people on the bot: only me, or everyone?
+            ask_tg_who(chat_id);
+            break;
+        }
+        wizard_finish(chat_id);
+        break;
+    }
+
+    case W_TG_WHO: {
+        int who = -1;
+        for (int l = 0; l < LANG_COUNT && who < 0; l++) {
+            who = strcasecmp(text, i18n_get(l)->btn_only_me) == 0 ? 0 : strcasecmp(text, i18n_get(l)->btn_everyone) == 0 ? 1 : -1;
+        }
+        if (who < 0) {
+            ask_tg_who(chat_id);
             return;
         }
-        char line[80], out[SCHED_TEXT + 140];
-        fmt_entry(&s_draft, line, sizeof(line));
-        snprintf(out, sizeof(out), "%s\n%s\n\xE2\x80\x9C%s\xE2\x80\x9D", T->sch_done, line, s_draft.text);
-        reply(chat_id, out);
+        if (who) {
+            s_draft.flags |= SCHED_F_TG_ALL;
+        }
+        wizard_finish(chat_id);
         break;
     }
 
@@ -1188,13 +1221,15 @@ typedef struct {
 } rem_ev_t;
 
 static QueueHandle_t s_rem_q;
-// reminders sent and still waiting for "Done": which Telegram message holds each button
+// reminders sent and still waiting for "Done": which Telegram message holds each button (one per person
+// when a reminder goes to everyone)
+#define REM_MAX (SCHED_MAX * (MEMBERS_MAX + 1))
 static struct {
     uint32_t id;
     int64_t occ;
     int64_t chat;
     int64_t msg_id;
-} s_rem[SCHED_MAX];
+} s_rem[REM_MAX];
 
 void telegram_reminder(uint32_t id, int64_t occ, bool closed)
 {
@@ -1234,74 +1269,104 @@ static void add_button(cJSON *body, const char *label, const char *data)
     cJSON_AddItemToArray(rows, row);
 }
 
-// replaces the button under a sent reminder; label "✅ Done 14:05" (fmt with the time) or none
-static void set_button(int64_t chat, int64_t msg_id, const char *fmt)
+// replaces the button under a sent reminder with a label (no longer a button), or removes it (NULL)
+static void set_button(int64_t chat, int64_t msg_id, const char *label)
 {
     cJSON *body = cJSON_CreateObject();
     cJSON_AddNumberToObject(body, "chat_id", (double)chat);
     cJSON_AddNumberToObject(body, "message_id", (double)msg_id);
-    char label[64];
-    if (fmt) {
-        time_t now = time(NULL);
-        struct tm tm;
-        localtime_r(&now, &tm);
-        char hm[12];
-        clock_fmt(hm, sizeof(hm), tm.tm_hour, tm.tm_min);
-        snprintf(label, sizeof(label), fmt, hm);
-    }
-    add_button(body, fmt ? label : NULL, NULL);
+    add_button(body, label, NULL);
     post("editMessageReplyMarkup", body, NULL);
 }
 
-static int rem_find(uint32_t id, int64_t occ)
+// "✅ Done 14:05" / "✅ Done by Ana 14:05": fmt with the time last (and a name first, if given)
+static void done_label(char *out, size_t size, const char *fmt, const char *name)
 {
-    for (int i = 0; i < SCHED_MAX; i++) {
-        if (s_rem[i].msg_id && s_rem[i].id == id && s_rem[i].occ == occ) {
-            return i;
-        }
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char hm[12];
+    clock_fmt(hm, sizeof(hm), tm.tm_hour, tm.tm_min);
+    if (name) {
+        snprintf(out, size, fmt, name, hm);
+    } else {
+        snprintf(out, size, fmt, hm);
     }
-    return -1;
 }
 
-static void rem_handle(const rem_ev_t *ev)
+// the reminder's occurrence left the screen: relabel (or clear) every message still holding its button,
+// except the one tapped (except_msg)
+static void rem_close(uint32_t id, int64_t occ, const char *label, int64_t except_msg)
 {
-    int i = rem_find(ev->id, ev->occ);
-    if (ev->closed) {
-        if (i >= 0) {   // deleted on the panel: the button says so
-            set_button(s_rem[i].chat, s_rem[i].msg_id, T->rem_done_panel_fmt);
+    for (int i = 0; i < REM_MAX; i++) {
+        if (s_rem[i].msg_id && s_rem[i].id == id && s_rem[i].occ == occ) {
+            if (s_rem[i].msg_id != except_msg) {
+                set_button(s_rem[i].chat, s_rem[i].msg_id, label);
+            }
             s_rem[i].msg_id = 0;
         }
-        return;
     }
-    static sched_t s;
-    if (i >= 0 || !sched_get(ev->id, &s)) {
-        return;
+}
+
+static bool rem_known(uint32_t id, int64_t occ)
+{
+    for (int i = 0; i < REM_MAX; i++) {
+        if (s_rem[i].msg_id && s_rem[i].id == id && s_rem[i].occ == occ) {
+            return true;
+        }
     }
+    return false;
+}
+
+static void rem_send(const sched_t *s, int64_t occ, int64_t chat)
+{
     char text[SCHED_TEXT + 8], data[40];
-    snprintf(text, sizeof(text), "\xF0\x9F\x94\x94 %s", s.text);   // 🔔
-    snprintf(data, sizeof(data), "d:%" PRIu32 ":%" PRId64, ev->id, ev->occ);
-    int64_t chat = chat_of(s.who);   // whoever created it
+    snprintf(text, sizeof(text), "\xF0\x9F\x94\x94 %s", s->text);   // 🔔
+    snprintf(data, sizeof(data), "d:%" PRIu32 ":%" PRId64, s->id, occ);
     cJSON *body = cJSON_CreateObject();
     cJSON_AddNumberToObject(body, "chat_id", (double)chat);
     cJSON_AddStringToObject(body, "text", text);
     add_button(body, T->rem_done_btn, data);
     int64_t msg_id = 0;
     post("sendMessage", body, &msg_id);
-    if (!msg_id) {
-        return;
-    }
-    // a free slot, or the same schedule's older occurrence (its button no longer matters)
-    int slot = 0;
-    for (int k = 0; k < SCHED_MAX; k++) {
-        if (!s_rem[k].msg_id || s_rem[k].id == ev->id) {
-            slot = k;
-            break;
+    for (int k = 0; msg_id && k < REM_MAX; k++) {
+        if (!s_rem[k].msg_id) {
+            s_rem[k].id = s->id;
+            s_rem[k].occ = occ;
+            s_rem[k].chat = chat;
+            s_rem[k].msg_id = msg_id;
+            return;
         }
     }
-    s_rem[slot].id = ev->id;
-    s_rem[slot].occ = ev->occ;
-    s_rem[slot].chat = chat;
-    s_rem[slot].msg_id = msg_id;
+}
+
+static void rem_handle(const rem_ev_t *ev)
+{
+    if (ev->closed) {   // deleted on the panel: the buttons say so
+        char label[64];
+        done_label(label, sizeof(label), T->rem_done_panel_fmt, NULL);
+        rem_close(ev->id, ev->occ, label, 0);
+        return;
+    }
+    static sched_t s;
+    if (rem_known(ev->id, ev->occ) || !sched_get(ev->id, &s)) {
+        return;
+    }
+    for (int k = 0; k < REM_MAX; k++) {
+        if (s_rem[k].msg_id && s_rem[k].id == ev->id) {
+            s_rem[k].msg_id = 0;   // an older occurrence of the same schedule: its button no longer matters
+        }
+    }
+    if (s.flags & SCHED_F_TG_ALL) {   // everyone on the bot: whoever is at hand can tap "Done"
+        rem_send(&s, ev->occ, g_cfg.tg_owner);
+        for (int m = 0; m < MEMBERS_MAX; m++) {
+            if (s_members[m].chat) {
+                rem_send(&s, ev->occ, s_members[m].chat);
+            }
+        }
+    } else {
+        rem_send(&s, ev->occ, chat_of(s.who));   // whoever created it
+    }
 }
 
 // a tap on an inline button
@@ -1324,15 +1389,23 @@ static void handle_callback(const cJSON *cb)
         set_button(chat, msg_id, NULL);
         send_members(chat);
     } else if (who_of(from) >= 0 && data && sscanf(data, "d:%" SCNu32 ":%" SCNd64, &id, &occ) == 2) {
-        int i = rem_find(id, occ);
-        if (i >= 0) {
-            s_rem[i].msg_id = 0;   // before sched_done: its "deleted on the panel" event must not relabel it
+        // the other people's copies: "Done by Ana"; done before sched_done, so its "deleted on the
+        // panel" event finds nothing left to relabel
+        char name[MSG_FROM], label[64];
+        sender_name(cb, name, sizeof(name));
+        done_label(label, sizeof(label), T->rem_done_by_fmt, name[0] ? name : "?");
+        bool shared = false;
+        for (int i = 0; i < REM_MAX; i++) {
+            shared |= s_rem[i].msg_id && s_rem[i].id == id && s_rem[i].occ == occ && s_rem[i].msg_id != msg_id;
         }
         if (sched_done(id, (time_t)occ)) {
             ESP_LOGI(TAG, "reminder done from Telegram");
-            set_button(chat, msg_id, T->rem_done_fmt);
+            rem_close(id, occ, shared ? label : NULL, msg_id);
+            done_label(label, sizeof(label), T->rem_done_fmt, NULL);
+            set_button(chat, msg_id, label);
         } else {
             answer = T->rem_gone;
+            rem_close(id, occ, NULL, msg_id);
             set_button(chat, msg_id, NULL);
         }
     }

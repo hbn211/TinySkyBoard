@@ -39,6 +39,8 @@ bool config_split_city(void);   // "A, B" in the main city -> main "A", B goes t
 uint8_t config_get_u8(const char *key);
 uint8_t config_get_u8_def(const char *key, uint8_t def);   // def if never saved
 void config_set_u8(const char *key, uint8_t val);
+void config_get_str(const char *key, char *out, size_t size);   // "" if never saved
+void config_set_str(const char *key, const char *val);
 
 // Requests setup mode on the next boot and restarts
 void config_request_portal(void);

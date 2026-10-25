@@ -30,6 +30,7 @@ typedef struct {
 } sched_t;
 
 #define SCHED_F_TG_DONE 0x01   // when it starts, also sent to Telegram with a "Done" button
+#define SCHED_F_TG_ALL  0x02   // with SCHED_F_TG_DONE: to everyone on the bot, not only whoever scheduled it
 
 // A message that is live right now: direct (Telegram) or a schedule within its window
 typedef struct {
