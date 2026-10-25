@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 — 2026-10-25
 
 - Scheduled messages with ✅ Done in Telegram can go to **everyone on the bot**, not only to whoever
   scheduled it: `/schedule` asks "only me / everyone" when there are invited people, and the
