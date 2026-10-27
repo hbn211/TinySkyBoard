@@ -34,7 +34,9 @@ class Peer:
         # the pairing code as the panel reads it: XXXX-XXXX, look-alikes B=8, S=5, Z=2, V=U (main/lan.c)
         c = "".join(ch for ch in password.upper() if ch.isalnum()).translate(str.maketrans("BSZV", "852U"))
         c = f"{c[:4]}-{c[4:]}" if len(c) == 8 else password
-        self.key = hashlib.sha256(c.encode()).digest()
+        # two keys (main/lan.c): one signs, one encrypts
+        self.key_mac = hashlib.sha256(b"tsb-mac:" + c.encode()).digest()
+        self.key_enc = hashlib.sha256(b"tsb-enc:" + c.encode()).digest()
         self.seq = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -44,11 +46,22 @@ class Peer:
         self.last_hello = 0.0
 
     def sign(self, data):
-        return hmac.new(self.key, data, hashlib.sha256).digest()[:16]
+        return hmac.new(self.key_mac, data, hashlib.sha256).digest()[:16]
+
+    def keystream_xor(self, nonce, data):
+        """encrypts or decrypts: XOR with HMAC(enc key, nonce | block number), 32 bytes a block"""
+        out = bytearray(data)
+        for off in range(0, len(out), 32):
+            ks = hmac.new(self.key_enc, nonce + struct.pack(">I", off // 32), hashlib.sha256).digest()
+            for i in range(min(32, len(out) - off)):
+                out[off + i] ^= ks[i]
+        return bytes(out)
 
     def send(self, ptype, payload, repeat=1):
         self.seq += 1
-        pkt = b"TSB1" + bytes([ptype]) + struct.pack(">I", self.seq) + MY_MAC + payload
+        nonce = os.urandom(8)
+        pkt = b"TSB2" + bytes([ptype]) + struct.pack(">I", self.seq) + MY_MAC + nonce
+        pkt += self.keystream_xor(nonce, struct.pack(">I", int(time.time())) + payload)
         pkt += self.sign(pkt)
         for _ in range(repeat):
             self.sock.sendto(pkt, ("255.255.255.255", PORT))
@@ -64,12 +77,17 @@ class Peer:
             data, addr = self.sock.recvfrom(2048)
         except socket.timeout:
             return None
-        if len(data) < 31 or data[:4] != b"TSB1" or data[9:15] == MY_MAC:
+        if len(data) < 43 or data[:4] != b"TSB2" or data[9:15] == MY_MAC:
             return None
         if not hmac.compare_digest(self.sign(data[:-16]), data[-16:]):
-            print(f"  bad signature from {addr[0]} (another password?)")
+            print(f"  bad signature from {addr[0]} (another code?)")
             return None
-        return data[4], data[9:15], data[15:-16], addr[0]
+        body = self.keystream_xor(data[15:23], data[23:-16])
+        sent = struct.unpack(">I", body[:4])[0]
+        if sent > 1700000000 and abs(time.time() - sent) > 120:
+            print(f"  packet from {addr[0]} {time.time() - sent:+.0f} s off (a replay, or a clock far off)")
+            return None
+        return data[4], data[9:15], body[4:], addr[0]
 
 
 def msg_payload(text, sender):

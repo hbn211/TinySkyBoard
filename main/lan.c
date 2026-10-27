@@ -1,8 +1,12 @@
-// Panels on the same network share messages and new schedules (experimental).
-// One UDP socket, broadcast on the local subnet, no TLS: every packet is signed with HMAC-SHA256 keyed
-// by the shared password, so only panels with the same password accept it. Small packets, one task.
+// Panels on the same network share messages and new schedules, and send what they show to mirrors
+// (the desktop extension). Experimental. One UDP socket, broadcast on the local subnet, no TLS.
+// Two keys come from the pairing code: the payload is encrypted (counter mode over HMAC-SHA256, a
+// random nonce per packet) and the whole packet is signed (HMAC-SHA256, encrypt-then-MAC), so only
+// panels with the same code read or accept it. The sender's clock goes inside, encrypted: a packet
+// more than REPLAY_S off is dropped (a replay; the seen ring catches the recent ones).
 //
-// Packet: "TSB1" | type (1) | seq (4, BE) | sender MAC (6) | payload | HMAC (16, truncated)
+// Packet: "TSB2" | type (1) | seq (4, BE) | sender MAC (6) | nonce (8) | encrypted: time (4, BE) | payload |
+//         HMAC (16, truncated) over everything before it
 //   HELLO  payload: version string                       every HELLO_S, "I'm here"
 //   MSG    payload: id (4) | from (24) | text            a direct message (from Telegram) to show
 //   SCHED  payload: id (4) | sched_t                     a new schedule
@@ -45,14 +49,19 @@
 #define SEEN_MAX        32
 #define REPEAT          3       // each message is broadcast this many times (UDP may drop one)
 #define REPEAT_MS       300
-#define HDR_LEN         15
+#define HDR_LEN         15      // in clear: magic, type, seq, sender
+#define NONCE_LEN       8
+#define TIME_LEN        4
+#define BODY_OFF        (HDR_LEN + NONCE_LEN + TIME_LEN)   // where the payload starts
 #define MAC_LEN         16
-#define PKT_MAX         (HDR_LEN + 4 + MSG_FROM + MSG_TEXT + MAC_LEN)
+#define PKT_MAX         (BODY_OFF + 4 + MSG_FROM + MSG_TEXT + MAC_LEN)
+#define REPLAY_S        120     // sender's and receiver's clocks may differ this much
+#define CLOCK_OK        1700000000   // a clock below this hasn't been set yet (no time check then)
 
 enum { T_HELLO = 1, T_MSG, T_SCHED, T_ACK, T_STATE };
 
 static const char *TAG = "lan";
-static uint8_t s_key[32];       // SHA-256 of the password
+static uint8_t s_key_mac[32], s_key_enc[32];   // from the pairing code (lan_start)
 static uint8_t s_mac[6];
 static uint32_t s_seq;
 static int s_sock = -1;
@@ -88,19 +97,18 @@ static void sha256(const uint8_t *a, size_t alen, const uint8_t *b, size_t blen,
     psa_hash_finish(&op, out, 32, &n);
 }
 
-// HMAC-SHA256 (RFC 2104) with the 32-byte key, truncated to MAC_LEN
-static void hmac(const uint8_t *data, size_t len, uint8_t out[MAC_LEN])
+// HMAC-SHA256 (RFC 2104) with a 32-byte key
+static void hmac(const uint8_t key[32], const uint8_t *data, size_t len, uint8_t out[32])
 {
-    uint8_t pad[64], inner[32], full[32];
+    uint8_t pad[64], inner[32];
     for (int i = 0; i < 64; i++) {
-        pad[i] = (i < 32 ? s_key[i] : 0) ^ 0x36;
+        pad[i] = (i < 32 ? key[i] : 0) ^ 0x36;
     }
     sha256(pad, 64, data, len, inner);
     for (int i = 0; i < 64; i++) {
-        pad[i] = (i < 32 ? s_key[i] : 0) ^ 0x5c;
+        pad[i] = (i < 32 ? key[i] : 0) ^ 0x5c;
     }
-    sha256(pad, 64, inner, 32, full);
-    memcpy(out, full, MAC_LEN);
+    sha256(pad, 64, inner, 32, out);
 }
 
 static void put32(uint8_t *p, uint32_t v)
@@ -118,16 +126,41 @@ static int64_t mono_s(void)
     return esp_timer_get_time() / 1000000;
 }
 
-// header + payload + signature into pkt
+// XOR with the keystream HMAC(enc key, nonce | block number): counter mode, 32 bytes a block
+static void keystream_xor(const uint8_t nonce[NONCE_LEN], uint8_t *data, size_t len)
+{
+    uint8_t ctr[NONCE_LEN + 4], ks[32];
+    memcpy(ctr, nonce, NONCE_LEN);
+    for (size_t off = 0; off < len; off += 32) {
+        put32(ctr + NONCE_LEN, off / 32);
+        hmac(s_key_enc, ctr, sizeof(ctr), ks);
+        for (size_t i = 0; i < 32 && off + i < len; i++) {
+            data[off + i] ^= ks[i];
+        }
+    }
+}
+
+// The payload is already at pk + BODY_OFF: header, nonce, clock, encryption and signature around it.
+// Returns the packet's length
+static size_t seal(uint8_t *pk, uint8_t type, size_t plen)
+{
+    memcpy(pk, "TSB2", 4);
+    pk[4] = type;
+    put32(pk + 5, ++s_seq);
+    memcpy(pk + 9, s_mac, 6);
+    esp_fill_random(pk + HDR_LEN, NONCE_LEN);
+    put32(pk + HDR_LEN + NONCE_LEN, (uint32_t)time(NULL));
+    keystream_xor(pk + HDR_LEN, pk + HDR_LEN + NONCE_LEN, TIME_LEN + plen);
+    uint8_t tag[32];
+    hmac(s_key_mac, pk, BODY_OFF + plen, tag);
+    memcpy(pk + BODY_OFF + plen, tag, MAC_LEN);
+    return BODY_OFF + plen + MAC_LEN;
+}
+
 static void build(pkt_t *pkt, uint8_t type, const void *payload, size_t plen)
 {
-    memcpy(pkt->buf, "TSB1", 4);
-    pkt->buf[4] = type;
-    put32(pkt->buf + 5, ++s_seq);
-    memcpy(pkt->buf + 9, s_mac, 6);
-    memcpy(pkt->buf + HDR_LEN, payload, plen);
-    hmac(pkt->buf, HDR_LEN + plen, pkt->buf + HDR_LEN + plen);
-    pkt->len = HDR_LEN + plen + MAC_LEN;
+    memcpy(pkt->buf + BODY_OFF, payload, plen);
+    pkt->len = seal(pkt->buf, type, plen);
 }
 
 static void send_now(const pkt_t *pkt)
@@ -210,23 +243,29 @@ int lan_peers(void)
     return n;
 }
 
-static void handle(const uint8_t *buf, int len)
+static void handle(uint8_t *buf, int len)
 {
-    if (len < HDR_LEN + MAC_LEN || memcmp(buf, "TSB1", 4) != 0 || memcmp(buf + 9, s_mac, 6) == 0) {
+    if (len < BODY_OFF + MAC_LEN || memcmp(buf, "TSB2", 4) != 0 || memcmp(buf + 9, s_mac, 6) == 0) {
         return;   // not ours, or our own broadcast coming back
     }
     if (buf[4] == T_STATE) {
         return;   // for the mirrors (and bigger than this buffer)
     }
-    uint8_t mac[MAC_LEN];
-    hmac(buf, len - MAC_LEN, mac);
-    if (memcmp(mac, buf + len - MAC_LEN, MAC_LEN) != 0) {
-        s_rx_bad++;   // another password, or damaged
+    uint8_t tag[32];
+    hmac(s_key_mac, buf, len - MAC_LEN, tag);
+    if (memcmp(tag, buf + len - MAC_LEN, MAC_LEN) != 0) {
+        s_rx_bad++;   // another code, or damaged
+        return;
+    }
+    keystream_xor(buf + HDR_LEN, buf + HDR_LEN + NONCE_LEN, len - HDR_LEN - NONCE_LEN - MAC_LEN);
+    int64_t sent = get32(buf + HDR_LEN + NONCE_LEN), now = time(NULL);
+    if (now > CLOCK_OK && sent > CLOCK_OK && llabs(now - sent) > REPLAY_S) {
+        s_rx_bad++;   // a recording played back (or a clock far off)
         return;
     }
     s_rx++;
-    const uint8_t *from = buf + 9, *p = buf + HDR_LEN;
-    int plen = len - HDR_LEN - MAC_LEN;
+    const uint8_t *from = buf + 9, *p = buf + BODY_OFF;
+    int plen = len - BODY_OFF - MAC_LEN;
     peer_seen(from);
     int64_t t0 = esp_timer_get_time();
     switch (buf[4]) {
@@ -302,8 +341,8 @@ static void send_state(bool force)
     if (!b) {
         return;
     }
-    char *o = (char *)b->pkt + HDR_LEN;   // the text goes straight after the header
-    size_t cap = STATE_MAX - HDR_LEN - MAC_LEN, n = 0;
+    char *o = (char *)b->pkt + BODY_OFF;   // the text goes where seal() expects the payload
+    size_t cap = STATE_MAX - BODY_OFF - MAC_LEN, n = 0;
 #define ADD(...) do { int k = snprintf(o + n, cap - n, __VA_ARGS__); n = k > 0 && n + k < cap ? n + k : n; } while (0)
     if (net_get_weather(&b->wx)) {
         int rain = b->wx.n_rain ? b->wx.rain_pct[0] : -1;
@@ -344,14 +383,9 @@ static void send_state(bool force)
     if (force || sum != last_sum || mono_s() - last_at >= STATE_S) {
         last_sum = sum;
         last_at = mono_s();
-        uint8_t *pk = b->pkt;   // build() is for pkt_t, sized for messages: same header, bigger buffer
-        memcpy(pk, "TSB1", 4);
-        pk[4] = T_STATE;
-        put32(pk + 5, ++s_seq);
-        memcpy(pk + 9, s_mac, 6);
-        hmac(pk, HDR_LEN + n, pk + HDR_LEN + n);
+        size_t len = seal(b->pkt, T_STATE, n);   // build() is for pkt_t, sized for messages
         struct sockaddr_in to = {.sin_family = AF_INET, .sin_port = htons(LAN_PORT), .sin_addr.s_addr = INADDR_BROADCAST};
-        if (sendto(s_sock, pk, HDR_LEN + n + MAC_LEN, 0, (struct sockaddr *)&to, sizeof(to)) > 0) {
+        if (sendto(s_sock, b->pkt, len, 0, (struct sockaddr *)&to, sizeof(to)) > 0) {
             s_tx++;
         }
     }
@@ -414,7 +448,7 @@ static void lan_task(void *arg)
 static void lan_begin(void *arg)
 {
     s_out = xQueueCreate(4, sizeof(pkt_t));
-    if (!s_out || xTaskCreate(lan_task, "lan", 3072, NULL, 3, NULL) != pdPASS) {
+    if (!s_out || xTaskCreate(lan_task, "lan", 3584, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "no memory to start");
     }
 }
@@ -480,7 +514,8 @@ void lan_start(const char *password)
     psa_crypto_init();   // already done by ESP-IDF; harmless if so
     char canon[LAN_CODE_SIZE + 8];
     code_canon(password, canon, sizeof(canon));   // codes made before the look-alikes were dropped
-    sha256((const uint8_t *)canon, strlen(canon), NULL, 0, s_key);
+    sha256((const uint8_t *)"tsb-mac:", 8, (const uint8_t *)canon, strlen(canon), s_key_mac);
+    sha256((const uint8_t *)"tsb-enc:", 8, (const uint8_t *)canon, strlen(canon), s_key_enc);
     esp_read_mac(s_mac, ESP_MAC_WIFI_STA);
     const esp_timer_create_args_t args = {.callback = lan_begin, .name = "lan"};
     esp_timer_handle_t t;

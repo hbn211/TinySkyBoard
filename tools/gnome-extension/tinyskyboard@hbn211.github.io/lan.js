@@ -1,12 +1,16 @@
 // Listens to the TinySkyBoard panels on the local network (main/lan.c). Receive only: it never
 // sends a packet, so the computer is a mirror and never a part of what the panels agree on.
-// Packet: "TSB1" | type (1) | seq (4) | sender MAC (6) | payload | HMAC-SHA256 (16), key = SHA-256(code)
+// Packet: "TSB2" | type (1) | seq (4) | sender MAC (6) | nonce (8) | encrypted: time (4) | payload |
+//         HMAC-SHA256 (16) over everything before it. Keys from the pairing code: SHA-256("tsb-mac:" +
+//         code) signs, SHA-256("tsb-enc:" + code) encrypts (keystream HMAC(key, nonce | block number))
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 export const PORT = 47474;
 const T_STATE = 5;
-const HDR = 15, TAG = 16;
+const HDR = 15, NONCE = 8, TIME = 4, BODY = HDR + NONCE + TIME, TAG = 16;
+const REPLAY_S = 120;           // older (or newer) than this by the sender's clock: a replay
+const CLOCK_OK = 1700000000;    // a clock below this isn't set yet
 const PEER_S = 30;      // a panel heard within this is "on the network" (they say hello every 10 s)
 const STALE_S = 90;     // the shown state is old after this (sent every 30 s at least)
 
@@ -61,7 +65,10 @@ export function parseState(text) {
 export class Receiver {
     // onUpdate({state, panels, age}) on every new state, and every few seconds for the panel count
     constructor(code, onUpdate) {
-        this._key = unhex(GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, normalizeCode(code), -1));
+        const c = normalizeCode(code);
+        const key = label => unhex(GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, label + c, -1));
+        this._keyMac = key('tsb-mac:');
+        this._keyEnc = key('tsb-enc:');
         this._onUpdate = onUpdate;
         this._peers = new Map();   // mac hex -> last heard (s)
         this._primary = null;      // the panel being mirrored: the first one heard, kept while it talks
@@ -115,13 +122,42 @@ export class Receiver {
         }
     }
 
+    _hmac(key, data) {
+        const h = GLib.Hmac.new(GLib.ChecksumType.SHA256, key);
+        h.update(data);
+        return h.get_string();   // hex
+    }
+
+    // decrypts in place: XOR with HMAC(enc key, nonce | block number), 32 bytes a block
+    _keystreamXor(nonce, data) {
+        const ctr = new Uint8Array(NONCE + 4);
+        ctr.set(nonce);
+        for (let off = 0; off < data.length; off += 32) {
+            const blk = off / 32;
+            ctr[NONCE] = blk >>> 24 & 255;
+            ctr[NONCE + 1] = blk >>> 16 & 255;
+            ctr[NONCE + 2] = blk >>> 8 & 255;
+            ctr[NONCE + 3] = blk & 255;
+            const ks = unhex(this._hmac(this._keyEnc, ctr));
+            for (let i = 0; i < 32 && off + i < data.length; i++)
+                data[off + i] ^= ks[i];
+        }
+    }
+
     _packet(d) {
-        if (d.length < HDR + TAG || d[0] !== 0x54 || d[1] !== 0x53 || d[2] !== 0x42 || d[3] !== 0x31)
-            return;   // not "TSB1"
-        const h = GLib.Hmac.new(GLib.ChecksumType.SHA256, this._key);
-        h.update(d.subarray(0, d.length - TAG));
-        if (h.get_string().slice(0, 2 * TAG) !== hex(d.subarray(d.length - TAG))) {
+        if (d.length < BODY + TAG || d[0] !== 0x54 || d[1] !== 0x53 || d[2] !== 0x42 || d[3] !== 0x32)
+            return;   // not "TSB2"
+        if (this._hmac(this._keyMac, d.subarray(0, d.length - TAG)).slice(0, 2 * TAG) !==
+            hex(d.subarray(d.length - TAG))) {
             this.bad++;   // another code
+            return;
+        }
+        const body = d.slice(HDR + NONCE, d.length - TAG);
+        this._keystreamXor(d.subarray(HDR, HDR + NONCE), body);
+        const sent = (body[0] << 24 | body[1] << 16 | body[2] << 8 | body[3]) >>> 0;
+        const wall = Date.now() / 1000;
+        if (wall > CLOCK_OK && sent > CLOCK_OK && Math.abs(wall - sent) > REPLAY_S) {
+            this.bad++;   // a recording played back (or a clock far off)
             return;
         }
         const mac = hex(d.subarray(9, 15));
@@ -132,7 +168,7 @@ export class Receiver {
         if (this._primary && this._primary !== mac && now - this._stateAt < STALE_S)
             return;
         this._primary = mac;
-        this._state = parseState(new TextDecoder().decode(d.subarray(HDR, d.length - TAG)));
+        this._state = parseState(new TextDecoder().decode(body.subarray(TIME)));
         this._stateAt = now;
         this._emit();
     }

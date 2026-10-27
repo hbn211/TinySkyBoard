@@ -159,8 +159,8 @@ static const char HELP_PT[] =
     "barra de cima: tempo, sensores, mensagens e o próximo agendamento. Ele só escuta, nunca envia nada.</li>"
     "<li>Outros painéis com o mesmo código recebem as mensagens do Telegram e os agendamentos novos.</li>"
     "<li>Só na mesma rede Wi-Fi. <b>Gerar um código novo</b> corta quem tinha o antigo.</li>"
-    "<li class=k>Os pacotes são assinados com o código (ninguém sem ele faz o painel mostrar algo), mas não "
-    "criptografados: quem está na mesma rede consegue lê-los.</li></ul>";
+    "<li class=k>Os pacotes vão criptografados e assinados com o código: sem ele, ninguém na rede lê o que "
+    "passa nem faz o painel mostrar algo, e um pacote gravado e reenviado depois é recusado.</li></ul>";
 
 static const char HELP_EN[] =
     HELP_STYLE
@@ -300,8 +300,8 @@ static const char HELP_EN[] =
     "top bar: weather, sensors, messages and the next schedule. It only listens, never sends.</li>"
     "<li>Other panels with the same code get the Telegram messages and new schedules.</li>"
     "<li>Only on the same Wi-Fi network. <b>Make a new code</b> cuts off whoever had the old one.</li>"
-    "<li class=k>The packets are signed with the code (nobody without it can make the panel show anything), "
-    "but not encrypted: anyone on the same network can read them.</li></ul>";
+    "<li class=k>The packets are encrypted and signed with the code: without it, nobody on the network can "
+    "read them or make the panel show anything, and a packet recorded and sent again later is dropped.</li></ul>";
 
 static const char HELP_ES[] =
     HELP_STYLE
@@ -443,8 +443,8 @@ static const char HELP_ES[] =
     "la barra de arriba: tiempo, sensores, mensajes y la próxima programación. Solo escucha, nunca envía.</li>"
     "<li>Otros paneles con el mismo código reciben los mensajes de Telegram y las programaciones nuevas.</li>"
     "<li>Solo en la misma red Wi-Fi. <b>Generar un código nuevo</b> corta a quien tenía el anterior.</li>"
-    "<li class=k>Los paquetes van firmados con el código (nadie sin él puede hacer que el panel muestre algo), "
-    "pero no cifrados: quien está en la misma red puede leerlos.</li></ul>";
+    "<li class=k>Los paquetes van cifrados y firmados con el código: sin él, nadie en la red puede leerlos ni "
+    "hacer que el panel muestre algo, y un paquete grabado y reenviado después se rechaza.</li></ul>";
 
 const char *portal_help_html(uint8_t lang)
 {

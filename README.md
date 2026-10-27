@@ -21,7 +21,7 @@ itself: no reflashing when you move or change networks.
 > pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
 > press **RESET**. The same page updates a board later and keeps its settings.
 
-**Version 1.8.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.8.1** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -410,8 +410,9 @@ a message sent to one shows on all of them, and a new schedule is added to all o
 - With **Share on the home network** on (off by default), the panel sends its screen (weather,
   sensors, the latest messages and the next schedule) to the home network every 30 s for the
   computer extension and the other panels. The packets are
-  **signed** with the pairing code, so nobody without it can make a panel show something, but they
-  are **not encrypted**: anyone on the same Wi-Fi network can read them.
+  **encrypted and signed** with keys made from the pairing code: without it, nobody on the network can
+  read them or make a panel show something, and a packet recorded and sent again later (more than
+  2 minutes off the panel's clock) is dropped. Only the packet type and the sender's address show.
 - The bot only obeys its owner and the people the owner invited. To hand it over, enter `0` as the
   token on the setup page and then the token again: the next chat to talk to it becomes the owner.
 
@@ -425,7 +426,7 @@ main/
   ui.c            dashboard, message screen, setup-mode screen
   net.c           Wi-Fi, NTP, Open-Meteo weather (main and other cities), geocoding, HTTPS helper
   telegram.c      bot: messages, commands, /schedule assistant, uptime notices
-  lan.c           home network: signed UDP broadcasts between panels and to the computer mirror
+  lan.c           home network: encrypted, signed UDP broadcasts between panels and to the computer mirror
   govee.c         Govee thermometers: polling in sync with the uploads, trend, day range
   psychro.h       dew point and the airing-out hint (header only)
   schedule.c/.h   active messages and schedules

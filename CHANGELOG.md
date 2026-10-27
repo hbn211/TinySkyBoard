@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.1 — 2026-10-27
+
+### Fixes
+
+- The home-network packets (panels and the computer extension) are now **encrypted**, not only
+  signed: 1.8.0 sent the screen and the messages readable to anyone on the same Wi-Fi network. They
+  also carry the sender's clock, so a packet recorded and sent again later is dropped. Panels on
+  1.8.0 and the extension from 1.8.0 don't understand the new packets: update both (run
+  `install.sh` again).
+
 ## 1.8.0 — 2026-10-27
 
 - **The panel in the computer's top bar** (experimental): a GNOME Shell extension that mirrors the
