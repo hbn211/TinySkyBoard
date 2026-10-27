@@ -31,7 +31,10 @@ MY_MAC = bytes([0x02, 0x54, 0x53, 0x42]) + random.randbytes(2)   # locally admin
 
 class Peer:
     def __init__(self, password):
-        self.key = hashlib.sha256(password.encode()).digest()
+        # the pairing code as the panel reads it: XXXX-XXXX, look-alikes B=8, S=5, Z=2, V=U (main/lan.c)
+        c = "".join(ch for ch in password.upper() if ch.isalnum()).translate(str.maketrans("BSZV", "852U"))
+        c = f"{c[:4]}-{c[4:]}" if len(c) == 8 else password
+        self.key = hashlib.sha256(c.encode()).digest()
         self.seq = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

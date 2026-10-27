@@ -419,8 +419,20 @@ static void lan_begin(void *arg)
     }
 }
 
-// Pairing code: 8 letters and digits without the look-alikes (0/O, 1/I/L), shown as XXXX-XXXX
-static const char CODE_ABC[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+// Pairing code: 8 letters and digits, shown as XXXX-XXXX. Made without the look-alikes (0/O, 1/I/L,
+// B/8, S/5, Z/2, V/U), and those typed by mistake count as the digit (or U): the key comes from this
+// canonical form, so "8" for "B" still pairs. Same rule in the extension and install.sh
+static const char CODE_ABC[] = "23456789ACDEFGHJKMNPQRTUWXY";
+
+static void code_canon(const char *in, char *out, size_t size)
+{
+    size_t n = 0;
+    for (; *in && n + 1 < size; in++) {
+        char c = *in >= 'a' && *in <= 'z' ? *in - 32 : *in;
+        out[n++] = c == 'B' ? '8' : c == 'S' ? '5' : c == 'Z' ? '2' : c == 'V' ? 'U' : c;
+    }
+    out[n] = '\0';
+}
 
 void lan_code_make(char out[LAN_CODE_SIZE])
 {
@@ -430,8 +442,10 @@ void lan_code_make(char out[LAN_CODE_SIZE])
     out[LAN_CODE_SIZE - 1] = '\0';
 }
 
-bool lan_code_set(const char *code)
+bool lan_code_set(const char *in)
 {
+    char code[LAN_CODE_SIZE + 1];
+    code_canon(in, code, sizeof(code));
     if (strlen(code) != LAN_CODE_SIZE - 1) {
         return false;
     }
@@ -464,7 +478,9 @@ void lan_start(const char *password)
     }
     s_started = true;
     psa_crypto_init();   // already done by ESP-IDF; harmless if so
-    sha256((const uint8_t *)password, strlen(password), NULL, 0, s_key);
+    char canon[LAN_CODE_SIZE + 8];
+    code_canon(password, canon, sizeof(canon));   // codes made before the look-alikes were dropped
+    sha256((const uint8_t *)canon, strlen(canon), NULL, 0, s_key);
     esp_read_mac(s_mac, ESP_MAC_WIFI_STA);
     const esp_timer_create_args_t args = {.callback = lan_begin, .name = "lan"};
     esp_timer_handle_t t;

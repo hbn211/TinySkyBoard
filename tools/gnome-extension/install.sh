@@ -30,10 +30,11 @@ set_enabled_setting() {
     gsettings set org.gnome.shell enabled-extensions "$new"
 }
 
-# the setup page shows XXXX-XXXX with letters and digits, no 0/O/1/I/L
+# the setup page shows XXXX-XXXX with letters and digits, no 0/O/1/I/L; look-alikes count as the
+# panel reads them (B=8, S=5, Z=2, V=U), so a code copied with one of them still pairs
 normalize_code() {
-    c=$(printf '%s' "$1" | tr 'a-z' 'A-Z' | tr -cd '0-9A-Z')
-    printf '%s' "$c" | grep -Eq '^[2-9A-HJKMNP-Z]{8}$' || return 1
+    c=$(printf '%s' "$1" | tr 'a-z' 'A-Z' | tr -cd '0-9A-Z' | tr 'BSZV' '852U')
+    printf '%s' "$c" | grep -Eq '^[2-9ACDEFGHJKMNPQRTUWXY]{8}$' || return 1
     printf '%s-%s' "$(printf '%s' "$c" | cut -c1-4)" "$(printf '%s' "$c" | cut -c5-8)"
 }
 

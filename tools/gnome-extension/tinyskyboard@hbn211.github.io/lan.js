@@ -10,9 +10,11 @@ const HDR = 15, TAG = 16;
 const PEER_S = 30;      // a panel heard within this is "on the network" (they say hello every 10 s)
 const STALE_S = 90;     // the shown state is old after this (sent every 30 s at least)
 
-// "k7pm 3qxd", "K7PM3QXD" -> "K7PM-3QXD", as the setup page shows it
+// "k7pm 3qxd", "K7PM3QXD" -> "K7PM-3QXD", as the setup page shows it; look-alikes as the panel reads
+// them (B=8, S=5, Z=2, V=U: main/lan.c), so a code copied with one of them still pairs
 export function normalizeCode(code) {
-    const c = (code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const c = (code || '').toUpperCase().replace(/[^0-9A-Z]/g, '')
+        .replace(/B/g, '8').replace(/S/g, '5').replace(/Z/g, '2').replace(/V/g, 'U');
     return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
 }
 
