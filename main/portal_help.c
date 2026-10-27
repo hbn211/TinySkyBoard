@@ -151,7 +151,16 @@ static const char HELP_PT[] =
     "<p>O bot também avisa sozinho quando o painel liga (e o motivo, como falta de energia) e quando a "
     "internet volta depois de cair.</p>"
     "<p class=k>Emojis aparecem coloridos na tela (cerca de 370 dos mais usados). Os que o painel não tem "
-    "ficam de fora e o bot avisa; tons de pele aparecem no tom padrão.</p>";
+    "ficam de fora e o bot avisa; tons de pele aparecem no tom padrão.</p>"
+    "<h2>Computador e outros painéis</h2>"
+    "<p>Desligado de fábrica. Em <b>Computador e outros painéis</b> na configuração, marque "
+    "<b>Compartilhar na rede de casa</b>: aparece o <b>código de pareamento</b>. Copie e salve.</p><ul>"
+    "<li>No computador com Linux (GNOME), o instalador do projeto (<code>install.sh</code>) põe o painel na "
+    "barra de cima: tempo, sensores, mensagens e o próximo agendamento. Ele só escuta, nunca envia nada.</li>"
+    "<li>Outros painéis com o mesmo código recebem as mensagens do Telegram e os agendamentos novos.</li>"
+    "<li>Só na mesma rede Wi-Fi. <b>Gerar um código novo</b> corta quem tinha o antigo.</li>"
+    "<li class=k>Os pacotes são assinados com o código (ninguém sem ele faz o painel mostrar algo), mas não "
+    "criptografados: quem está na mesma rede consegue lê-los.</li></ul>";
 
 static const char HELP_EN[] =
     HELP_STYLE
@@ -283,7 +292,16 @@ static const char HELP_EN[] =
     "<p>The bot also tells you on its own when the panel powers on (and why, like a power cut) and when "
     "the internet comes back after a drop.</p>"
     "<p class=k>Emoji show in color on the screen (about 370 of the most used). The ones the panel doesn't "
-    "have are left out and the bot tells you; skin tones show in the default tone.</p>";
+    "have are left out and the bot tells you; skin tones show in the default tone.</p>"
+    "<h2>Computer and other panels</h2>"
+    "<p>Off by default. Under <b>Computer and other panels</b> on the setup page, tick "
+    "<b>Share on the home network</b>: the <b>pairing code</b> shows up. Copy it and save.</p><ul>"
+    "<li>On a Linux computer (GNOME), the project's installer (<code>install.sh</code>) puts the panel in the "
+    "top bar: weather, sensors, messages and the next schedule. It only listens, never sends.</li>"
+    "<li>Other panels with the same code get the Telegram messages and new schedules.</li>"
+    "<li>Only on the same Wi-Fi network. <b>Make a new code</b> cuts off whoever had the old one.</li>"
+    "<li class=k>The packets are signed with the code (nobody without it can make the panel show anything), "
+    "but not encrypted: anyone on the same network can read them.</li></ul>";
 
 static const char HELP_ES[] =
     HELP_STYLE
@@ -417,7 +435,16 @@ static const char HELP_ES[] =
     "<p>El bot también avisa solo cuando el panel se enciende (y el motivo, como un corte de luz) y cuando "
     "vuelve internet después de caerse.</p>"
     "<p class=k>Los emojis aparecen en color en la pantalla (unos 370 de los más usados). Los que el panel "
-    "no tiene quedan fuera y el bot avisa; los tonos de piel salen en el tono por defecto.</p>";
+    "no tiene quedan fuera y el bot avisa; los tonos de piel salen en el tono por defecto.</p>"
+    "<h2>Ordenador y otros paneles</h2>"
+    "<p>Apagado de fábrica. En <b>Ordenador y otros paneles</b> en la configuración, marca "
+    "<b>Compartir en la red de casa</b>: aparece el <b>código de emparejamiento</b>. Cópialo y guarda.</p><ul>"
+    "<li>En un ordenador con Linux (GNOME), el instalador del proyecto (<code>install.sh</code>) pone el panel en "
+    "la barra de arriba: tiempo, sensores, mensajes y la próxima programación. Solo escucha, nunca envía.</li>"
+    "<li>Otros paneles con el mismo código reciben los mensajes de Telegram y las programaciones nuevas.</li>"
+    "<li>Solo en la misma red Wi-Fi. <b>Generar un código nuevo</b> corta a quien tenía el anterior.</li>"
+    "<li class=k>Los paquetes van firmados con el código (nadie sin él puede hacer que el panel muestre algo), "
+    "pero no cifrados: quien está en la misma red puede leerlos.</li></ul>";
 
 const char *portal_help_html(uint8_t lang)
 {
