@@ -420,25 +420,40 @@ static void lan_begin(void *arg)
 }
 
 // Pairing code: 8 letters and digits without the look-alikes (0/O, 1/I/L), shown as XXXX-XXXX
-#define CODE_LEN 9
-void lan_code_new(void)
+static const char CODE_ABC[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+void lan_code_make(char out[LAN_CODE_SIZE])
 {
-    static const char ABC[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    char code[CODE_LEN + 1];
-    for (int i = 0; i < CODE_LEN; i++) {
-        code[i] = i == 4 ? '-' : ABC[esp_random() % (sizeof(ABC) - 1)];
+    for (int i = 0; i < LAN_CODE_SIZE - 1; i++) {
+        out[i] = i == 4 ? '-' : CODE_ABC[esp_random() % (sizeof(CODE_ABC) - 1)];
     }
-    code[CODE_LEN] = '\0';
-    config_set_str("lan_code", code);
-    ESP_LOGI(TAG, "new pairing code %s", code);
+    out[LAN_CODE_SIZE - 1] = '\0';
 }
 
+bool lan_code_set(const char *code)
+{
+    if (strlen(code) != LAN_CODE_SIZE - 1) {
+        return false;
+    }
+    for (int i = 0; i < LAN_CODE_SIZE - 1; i++) {
+        if (i == 4 ? code[i] != '-' : !strchr(CODE_ABC, code[i])) {
+            return false;
+        }
+    }
+    config_set_str("lan_code", code);
+    ESP_LOGI(TAG, "new pairing code");
+    return true;
+}
+
+// made the first time it's asked for (the setup page shows it before sharing is on: unused until then)
 void lan_code_get(char *out, size_t size)
 {
     config_get_str("lan_code", out, size);
     if (!out[0]) {
-        lan_code_new();
-        config_get_str("lan_code", out, size);
+        char code[LAN_CODE_SIZE];
+        lan_code_make(code);
+        lan_code_set(code);
+        strlcpy(out, code, size);
     }
 }
 

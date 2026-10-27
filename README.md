@@ -353,8 +353,8 @@ Ubuntu 26.04 (GNOME Shell 50).
 **Install**
 
 1. On the panel's setup page, under *Computer and other panels*, tick **Share on the home network**
-   and save (it is off by default). After the panel restarts, open the page again: the same section
-   shows the **pairing code** (`XXXX-XXXX`), made by the panel.
+   (it is off by default): the **pairing code** (`XXXX-XXXX`), made by the panel, shows right below.
+   Copy it and **Save**.
 2. On the computer, in a terminal, from the folder where you downloaded this repository:
    ```sh
    tools/gnome-extension/install.sh XXXX-XXXX
@@ -377,8 +377,8 @@ If the computer has a firewall, allow incoming UDP on port 47474 from the home n
 
 It updates within 5 s of any change on the panel, and at least every 30 s.
 
-**New code**: tick *Make a new code* on the setup page and save; computers (and other panels) with
-the old one stop receiving. Run `install.sh` again with the new code.
+**New code**: tick *Make a new code* on the setup page: the new one shows at once; copy it and save.
+Computers (and other panels) with the old one stop receiving: run `install.sh` again with the new code.
 
 **Uninstall**
 

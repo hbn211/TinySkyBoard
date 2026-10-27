@@ -155,7 +155,7 @@ typedef struct {
     const char *p_al_silent;
     const char *p_govee_int;
     const char *p_govee_int_hint;
-    const char *p_lan_on, *p_lan_off_hint;        // sharing on the home network (experimental), off by default
+    const char *p_lan_on, *p_lan_about;           // sharing on the home network (experimental), off by default
     const char *p_lan, *p_lan_hint, *p_lan_new;   // its pairing code, for other panels and the computer
     const char *p_save;
     const char *p_required;

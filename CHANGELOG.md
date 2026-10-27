@@ -6,8 +6,9 @@
   panel on the same Wi-Fi network — weather, sensors, airing-out hint, the latest messages and the
   next schedule. It only listens. Install and uninstall in the README.
 - **Share on the home network**, off by default, in a new section of the setup page (*Computer and
-  other panels*). When on, the panel makes a **pairing code** and shows it there: the computer and
-  other panels need it to hear this panel. "Make a new code" cuts off the ones with the old code.
+  other panels*). Ticking it shows the panel's **pairing code** right away: the computer and other
+  panels need it to hear this panel. "Make a new code" shows a new one at once and, saved, cuts off
+  the ones with the old code.
 - Panels with the same code on the same network share messages from Telegram and new schedules.
 - `tools/lan_peer.py` acts as a panel from a computer, for testing.
 

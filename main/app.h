@@ -151,8 +151,10 @@ void telegram_reminder(uint32_t id, int64_t occ, bool closed);
 void lan_start(const char *password);
 void lan_share_msg(const char *from, const char *text);
 int lan_peers(void);
+#define LAN_CODE_SIZE 10                     // "XXXX-XXXX" and the terminator
 void lan_code_get(char *out, size_t size);   // pairing code (the LAN password); made on first use
-void lan_code_new(void);   // panels heard in the last 30 s
+void lan_code_make(char out[LAN_CODE_SIZE]); // a new random one (not saved)
+bool lan_code_set(const char *code);         // saves it; false if it isn't a valid code   // panels heard in the last 30 s
 // crash.c: after a crash, "reason · task · PC/RA · version" for the power-on notice (once)
 bool crash_take(char *out, size_t size);
 // keeps only what the panel can draw (fonts + color emoji); returns how many characters were dropped

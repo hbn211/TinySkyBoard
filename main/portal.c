@@ -793,30 +793,31 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</small>");
     send_alerts(req, L);
     send_compare(req, L);
-    // sharing on the home network: off unless turned on here; the code exists only once it's on
+    // sharing on the home network: off unless turned on here. The code is shown as soon as the box is
+    // ticked (made now if there is none: unused while sharing is off), and "make a new code" shows the
+    // new one at once; Save keeps what is shown
     section(req, L, 5);
     bool lan_on = config_get_u8_def("lan_on", 0);
-    out(req, lan_on ? "<label class=chk><input type=checkbox name=lan_on value=1 checked> "
-                    : "<label class=chk><input type=checkbox name=lan_on value=1> ");
+    char code[LAN_CODE_SIZE], fresh[LAN_CODE_SIZE], buf[400];
+    lan_code_get(code, sizeof(code));
+    lan_code_make(fresh);
+    snprintf(buf, sizeof(buf), "<label class=chk><input type=checkbox name=lan_on value=1%s "
+             "onchange=\"document.getElementById('lan').hidden=!this.checked\"> ", lan_on ? " checked" : "");
+    out(req, buf);
     out(req, L->p_lan_on);
-    out(req, "</label>");
-    if (lan_on) {
-        char code[16];
-        lan_code_get(code, sizeof(code));
-        out(req, "<label>");
-        out(req, L->p_lan);
-        out(req, "</label><code style='font-size:1.4em;letter-spacing:.1em'>");
-        out(req, code);
-        out(req, "</code><small>");
-        out(req, L->p_lan_hint);
-        out(req, "</small><label class=chk><input type=checkbox name=lan_new value=1> ");
-        out(req, L->p_lan_new);
-        out(req, "</label>");
-    } else {
-        out(req, "<small>");
-        out(req, L->p_lan_off_hint);
-        out(req, "</small>");
-    }
+    out(req, "</label><small>");
+    out(req, L->p_lan_about);
+    out(req, lan_on ? "</small><div id=lan><label>" : "</small><div id=lan hidden><label>");
+    out(req, L->p_lan);
+    snprintf(buf, sizeof(buf), "</label><code id=lanc style='font-size:1.4em;letter-spacing:.1em'>%s</code><small>",
+             code);
+    out(req, buf);
+    out(req, L->p_lan_hint);
+    snprintf(buf, sizeof(buf), "</small><label class=chk><input type=checkbox name=lan_new value=%s "
+             "onchange=\"document.getElementById('lanc').textContent=this.checked?'%s':'%s'\"> ", fresh, fresh, code);
+    out(req, buf);
+    out(req, L->p_lan_new);
+    out(req, "</label></div>");
     out(req, "</section><button>");
     out(req, L->p_save);
     char footer[96];
@@ -929,10 +930,10 @@ static esp_err_t save_post(httpd_req_t *req)
         strlcpy(g_cfg.tg_token, tg, sizeof(g_cfg.tg_token));
         g_cfg.tg_owner = 0;   // new bot, new owner
     }
-    char lan_new[4];
+    char lan_new[LAN_CODE_SIZE + 2];
     config_set_u8("lan_on", form_value(body, "lan_on", lan_new, sizeof(lan_new)));   // unchecked boxes aren't sent
-    if (form_value(body, "lan_new", lan_new, sizeof(lan_new)) && lan_new[0] == '1') {
-        lan_code_new();   // the panels and computers with the old one stop hearing this panel
+    if (form_value(body, "lan_new", lan_new, sizeof(lan_new))) {
+        lan_code_set(lan_new);   // the one the page showed; panels and computers with the old one stop hearing
     }
     // pasted keys often come with spaces around them
     char *g = govee + strspn(govee, " \t");
