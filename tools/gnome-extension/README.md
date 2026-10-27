@@ -18,5 +18,8 @@ else. It never sends a packet.
 gjs -m test_lan.js XXXX-XXXX 40
 ```
 
-After changing the extension, log out and back in to load it (on Wayland GNOME Shell can't be
+For development, link the folder instead of installing a copy, so edits are picked up:
+`ln -s "$PWD/tinyskyboard@hbn211.github.io" ~/.local/share/gnome-shell/extensions/`
+(`install.sh --uninstall` removes only the link). After changing the extension, log out and back in
+to load it (on Wayland GNOME Shell can't be
 restarted in place). Errors show in `journalctl --user -b | grep -i tinyskyboard`.

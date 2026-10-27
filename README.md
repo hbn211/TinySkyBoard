@@ -355,14 +355,12 @@ Ubuntu 26.04 (GNOME Shell 50).
 1. On the panel's setup page, under *Integrations*, copy the **pairing code** (`XXXX-XXXX`).
 2. On the computer, in a terminal, from the folder where you downloaded this repository:
    ```sh
-   mkdir -p ~/.config/tinyskyboard
-   echo 'XXXX-XXXX' > ~/.config/tinyskyboard/code      # your code
-   chmod 600 ~/.config/tinyskyboard/code
-   mkdir -p ~/.local/share/gnome-shell/extensions
-   ln -s "$PWD/tools/gnome-extension/tinyskyboard@hbn211.github.io" ~/.local/share/gnome-shell/extensions/
-   gnome-extensions enable tinyskyboard@hbn211.github.io
+   tools/gnome-extension/install.sh XXXX-XXXX
    ```
-3. Log out and back in (GNOME only finds new extensions at login).
+   (without the code it asks for it). It copies the extension to your user's GNOME extensions,
+   saves the code in `~/.config/tinyskyboard/code` and turns the extension on.
+3. If it doesn't show up in the top bar, log out and back in (GNOME only finds new extensions at
+   login).
 
 If the computer has a firewall, allow incoming UDP on port 47474 from the home network
 (`sudo ufw allow 47474/udp`).
@@ -378,18 +376,17 @@ If the computer has a firewall, allow incoming UDP on port 47474 from the home n
 It updates within 5 s of any change on the panel, and at least every 30 s.
 
 **New code**: tick *Make a new code* on the setup page and save; computers (and other panels) with
-the old one stop receiving. Write the new one to `~/.config/tinyskyboard/code` and log out and back in.
+the old one stop receiving. Run `install.sh` again with the new code.
 
 **Uninstall**
 
 ```sh
-gnome-extensions disable tinyskyboard@hbn211.github.io                 # leaves the top bar at once
-rm ~/.local/share/gnome-shell/extensions/tinyskyboard@hbn211.github.io  # no "/" at the end
-rm -r ~/.config/tinyskyboard                                           # optional: the code
+tools/gnome-extension/install.sh --uninstall           # removes the extension, keeps the code
+tools/gnome-extension/install.sh --uninstall --purge   # also removes the pairing code
 ```
 
-The second line removes only the link, not the repository's folder; keep it without a `/` at the
-end. To bring it back while it's still installed: `gnome-extensions enable tinyskyboard@hbn211.github.io`.
+Without the downloaded folder: `gnome-extensions uninstall tinyskyboard@hbn211.github.io`, and
+`rm -r ~/.config/tinyskyboard` for the code.
 
 Panels with the **same pairing code** on the same network also share what arrives through Telegram:
 a message sent to one shows on all of them, and a new schedule is added to all of them.
