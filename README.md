@@ -352,7 +352,7 @@ Ubuntu 26.04 (GNOME Shell 50).
 
 **Install**
 
-1. On the panel's setup page, under *Integrations*, copy the **pairing code** (`XXXX-XXXX`).
+1. On the panel's setup page, under *Telegram and sensors*, copy the **pairing code** (`XXXX-XXXX`).
 2. On the computer, in a terminal, from the folder where you downloaded this repository:
    ```sh
    tools/gnome-extension/install.sh XXXX-XXXX
