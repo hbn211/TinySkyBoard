@@ -12,8 +12,8 @@ It goes out within 5 s of any change and at least every 30 s. Two keys come from
 `SHA-256("tsb-mac:" + code)` and `SHA-256("tsb-enc:" + code)`. The payload, with the sender's clock in
 front, is encrypted with a keystream `HMAC-SHA256(enc key, nonce | block number)` from a random 8-byte
 nonce per packet, and the whole packet is signed with `HMAC-SHA256(mac key)` (truncated to 16 bytes).
-`lan.js` checks the signature, decrypts, and drops packets more than 2 minutes off its clock. It never
-sends a packet.
+`lan.js` checks the signature, decrypts, and drops a packet older than the newest one already taken
+from that panel (by the panel's clock, not the computer's). It never sends a packet.
 
 `test_lan.js` runs the receiver without GNOME Shell and prints each state:
 

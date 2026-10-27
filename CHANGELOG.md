@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.0 — 2026-10-27
+
+- **The panel on Windows** (experimental): the temperature as the icon by the clock, and the panel
+  in its menu — weather, sensors, airing-out hint, the latest messages and the next schedule. A
+  mirror, like the GNOME extension: it only listens. One `.exe` on the release; it asks for the
+  pairing code, can start with Windows, and its menu says why when nothing arrives (firewall, a
+  network set as Public, another code).
+- The GNOME extension comes as a `.zip` on the release too, with its installer.
+
+### Fixes
+
+- The computer mirrors no longer depend on the computer's clock to drop replayed packets (they drop
+  one older than the newest from its panel): a dual-boot PC that starts Windows an hour or two off
+  showed nothing until its clock synced.
+
 ## 1.8.1 — 2026-10-27
 
 ### Fixes

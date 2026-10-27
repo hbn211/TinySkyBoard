@@ -1,5 +1,6 @@
-# On a version tag (v1.4.0, ...): build the firmware, attach it to a GitHub Release and publish the
-# browser flasher (flasher/ + the firmware) on GitHub Pages.
+# On a version tag (v1.4.0, ...): build the firmware and the Windows tray app, attach them (and the
+# GNOME extension) to a GitHub Release and publish the browser flasher (flasher/ + the firmware) on
+# GitHub Pages.
 name: Release
 
 on:
@@ -43,6 +44,20 @@ jobs:
           sudo chown -R "$USER" dist site
           sed -i "s/__VERSION__/$VERSION/g" site/manifest.json site/index.html
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/windows/go.mod
+          cache-dependency-path: tools/windows/go.sum
+
+      - name: Windows tray app and GNOME extension
+        run: |
+          cd tools/windows
+          go test ./...
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-H windowsgui -s -w -X main.version=$VERSION" -o "../../dist/TinySkyBoard-$VERSION-windows.exe" .
+          cd ..
+          zip -qr "../dist/tinyskyboard-$VERSION-gnome-extension.zip" gnome-extension
+
       - name: Release notes from CHANGELOG.md
         if: github.ref_type == 'tag'
         run: |
@@ -51,13 +66,19 @@ jobs:
 
           **Install:** open the [browser flasher](https://hbn211.github.io/TinySkyBoard/) in Chrome or Edge,
           or flash `*-full.bin` at offset `0x0` with esptool (this one erases the saved settings).
+
+          **On the computer** (turn on *Share on the home network* on the panel's setup page first):
+          Windows, run `*-windows.exe`; Ubuntu/GNOME, unzip `*-gnome-extension.zip` and run `install.sh`.
           EOF
 
       - uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
           body_path: notes.md
-          files: dist/*.bin
+          files: |
+            dist/*.bin
+            dist/*.exe
+            dist/*.zip
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -21,7 +21,7 @@ itself: no reflashing when you move or change networks.
 > pictures: plug in the cable, hold **BOOT** and tap **RESET**, click **Flash the board**, then
 > press **RESET**. The same page updates a board later and keeps its settings.
 
-**Version 1.8.1** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
+**Version 1.9.0** — see the [changelog](CHANGELOG.md). The version also shows at the bottom of
 the setup page and in the bot's `/status` reply.
 
 ![TinySkyBoard running on a Waveshare ESP32-C6-LCD-1.47](docs/images/panel.jpg)
@@ -342,32 +342,49 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
 (day/month in Portuguese and Spanish) and `in 30 min`, and durations like `30 min`, `2 h`,
 `1h30` or `1 day`.
 
-### On the computer (GNOME top bar) — experimental
+### On the computer (Windows, Ubuntu/GNOME) — experimental
 
-A GNOME Shell extension shows the panel in the computer's top bar: the weather and temperature, and
-on a click the sensors, the airing-out hint, the latest messages (unread ones marked) and the next
-schedule. It is a **mirror**: it only listens to the panel on the same Wi-Fi network and never sends
-anything to it. It follows the computer's language (English, Portuguese or Spanish). Tested on
-Ubuntu 26.04 (GNOME Shell 50).
+The computer shows the panel by the clock: on Windows the temperature is the notification-area icon,
+on GNOME it's in the top bar; a click shows the sensors, the airing-out hint, the latest messages
+(unread ones marked) and the next schedule. It is a **mirror**: it only listens to the panel on the
+same Wi-Fi network and never sends anything to it. It follows the computer's language (English,
+Portuguese or Spanish). Tested on Windows and on Ubuntu 26.04 (GNOME Shell 50).
 
-**Install**
+First, on the panel's setup page, under *Computer and other panels*, tick **Share on the home
+network** (it is off by default): the **pairing code** (`XXXX-XXXX`), made by the panel, shows right
+below. Copy it and **Save**.
 
-1. On the panel's setup page, under *Computer and other panels*, tick **Share on the home network**
-   (it is off by default): the **pairing code** (`XXXX-XXXX`), made by the panel, shows right below.
-   Copy it and **Save**.
-2. On the computer, in a terminal, from the folder where you downloaded this repository:
+**Windows**
+
+1. Download `TinySkyBoard-…-windows.exe` from the [latest release](https://github.com/hbn211/TinySkyBoard/releases/latest)
+   and put it in a folder of its own, like `C:\TinySkyBoard` (*Start with Windows* starts it from
+   there). It isn't signed: if Windows says it protected the PC, click *More info* → *Run anyway*.
+2. Run it and type the pairing code. If the firewall asks, allow it on **private networks**; the
+   Wi-Fi network must be set as *Private* in Windows' network settings.
+3. The temperature shows by the clock (on Windows 11 maybe under the **^** arrow: drag it to the
+   taskbar). Its menu has *Change the pairing code…*, *Start with Windows*, *Open the log* and *Quit*;
+   when nothing arrives, a grey line in the menu says why.
+
+To remove it: untick *Start with Windows*, *Quit*, and delete the `.exe` and the folder
+`%APPDATA%\TinySkyBoard` (the code and the log).
+
+**Ubuntu / GNOME**
+
+1. Download `tinyskyboard-…-gnome-extension.zip` from the
+   [latest release](https://github.com/hbn211/TinySkyBoard/releases/latest) and unzip it (or use
+   `tools/gnome-extension` in a copy of this repository). In a terminal, in that folder:
    ```sh
-   tools/gnome-extension/install.sh XXXX-XXXX
+   ./install.sh XXXX-XXXX
    ```
    (without the code it asks for it). It copies the extension to your user's GNOME extensions,
    saves the code in `~/.config/tinyskyboard/code` and turns the extension on.
-3. If it doesn't show up in the top bar, log out and back in (GNOME only finds new extensions at
+2. If it doesn't show up in the top bar, log out and back in (GNOME only finds new extensions at
    login).
 
 If the computer has a firewall, allow incoming UDP on port 47474 from the home network
 (`sudo ufw allow 47474/udp`).
 
-**What it shows**
+**What it shows (GNOME)**
 
 | | |
 |---|---|
@@ -378,13 +395,14 @@ If the computer has a firewall, allow incoming UDP on port 47474 from the home n
 It updates within 5 s of any change on the panel, and at least every 30 s.
 
 **New code**: tick *Make a new code* on the setup page: the new one shows at once; copy it and save.
-Computers (and other panels) with the old one stop receiving: run `install.sh` again with the new code.
+Computers (and other panels) with the old one stop receiving: on Windows use *Change the pairing
+code…* in the menu, on GNOME run `install.sh` again with the new code.
 
-**Uninstall**
+**Uninstall (GNOME)**
 
 ```sh
-tools/gnome-extension/install.sh --uninstall           # removes the extension, keeps the code
-tools/gnome-extension/install.sh --uninstall --purge   # also removes the pairing code
+./install.sh --uninstall           # removes the extension, keeps the code
+./install.sh --uninstall --purge   # also removes the pairing code
 ```
 
 Without the downloaded folder: `gnome-extensions uninstall tinyskyboard@hbn211.github.io`, and
@@ -444,6 +462,7 @@ tools/
   gen_emoji.py    builds main/emoji from emoji_list.txt
   lan_peer.py     acts as a panel from a computer: listen, send messages and schedules, stress test
   gnome-extension/  the GNOME top-bar mirror (and test_lan.js, its receiver without GNOME Shell)
+  windows/        the Windows notification-area mirror (Go; builds on Linux too, see its README)
 flasher/          browser flasher page (ESP Web Tools), published by the release workflow
 .github/workflows release build: firmware files on the release, flasher on GitHub Pages
 partitions.csv    single 3.9 MB app partition

@@ -9,8 +9,10 @@ import GLib from 'gi://GLib';
 export const PORT = 47474;
 const T_STATE = 5;
 const HDR = 15, NONCE = 8, TIME = 4, BODY = HDR + NONCE + TIME, TAG = 16;
-const REPLAY_S = 120;           // older (or newer) than this by the sender's clock: a replay
-const CLOCK_OK = 1700000000;    // a clock below this isn't set yet
+// Replays: a packet older than the newest already taken from its panel (by the panel's clock) is
+// dropped; not by this computer's clock, which a dual-boot PC often has off for a while
+const REORDER_S = 5;            // this much older still counts (copies, reordering)
+const RESYNC_N = 6;             // this many older ones in a row: the panel's clock went back, follow it
 const PEER_S = 30;      // a panel heard within this is "on the network" (they say hello every 10 s)
 const STALE_S = 90;     // the shown state is old after this (sent every 30 s at least)
 
@@ -71,6 +73,8 @@ export class Receiver {
         this._keyEnc = key('tsb-enc:');
         this._onUpdate = onUpdate;
         this._peers = new Map();   // mac hex -> last heard (s)
+        this._latest = new Map();  // mac hex -> newest panel clock taken
+        this._olderRun = new Map();
         this._primary = null;      // the panel being mirrored: the first one heard, kept while it talks
         this._state = null;
         this._stateAt = 0;
@@ -155,12 +159,19 @@ export class Receiver {
         const body = d.slice(HDR + NONCE, d.length - TAG);
         this._keystreamXor(d.subarray(HDR, HDR + NONCE), body);
         const sent = (body[0] << 24 | body[1] << 16 | body[2] << 8 | body[3]) >>> 0;
-        const wall = Date.now() / 1000;
-        if (wall > CLOCK_OK && sent > CLOCK_OK && Math.abs(wall - sent) > REPLAY_S) {
-            this.bad++;   // a recording played back (or a clock far off)
-            return;
-        }
         const mac = hex(d.subarray(9, 15));
+        const last = this._latest.get(mac);
+        if (last !== undefined && sent + REORDER_S < last) {
+            const run = (this._olderRun.get(mac) ?? 0) + 1;
+            this._olderRun.set(mac, run);
+            if (run < RESYNC_N) {
+                this.bad++;   // a recording played back
+                return;
+            }
+        }
+        this._olderRun.set(mac, 0);
+        if (last === undefined || sent > last || last - sent > REORDER_S)
+            this._latest.set(mac, sent);
         const now = this._now();
         this._peers.set(mac, now);
         if (d[4] !== T_STATE)
