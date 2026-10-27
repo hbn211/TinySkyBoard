@@ -352,7 +352,9 @@ Ubuntu 26.04 (GNOME Shell 50).
 
 **Install**
 
-1. On the panel's setup page, under *Telegram and sensors*, copy the **pairing code** (`XXXX-XXXX`).
+1. On the panel's setup page, under *Computer and other panels*, tick **Share on the home network**
+   and save (it is off by default). After the panel restarts, open the page again: the same section
+   shows the **pairing code** (`XXXX-XXXX`), made by the panel.
 2. On the computer, in a terminal, from the folder where you downloaded this repository:
    ```sh
    tools/gnome-extension/install.sh XXXX-XXXX
@@ -404,9 +406,10 @@ a message sent to one shows on all of them, and a new schedule is added to all o
 - When opened from the **Set up over Wi-Fi** card, the page (with the scheduled messages and the
   configuration backup) is reachable by anyone on your home network until you close it or after
   10 minutes without use. It never shows the saved Wi-Fi password, bot token or Govee key, and the
-  backup file leaves them out.
-- The panel sends its screen (weather, sensors, the latest messages and the next schedule) to the
-  home network every 30 s for the computer extension and the other panels. The packets are
+  backup file leaves them out (and the pairing code).
+- With **Share on the home network** on (off by default), the panel sends its screen (weather,
+  sensors, the latest messages and the next schedule) to the home network every 30 s for the
+  computer extension and the other panels. The packets are
   **signed** with the pairing code, so nobody without it can make a panel show something, but they
   are **not encrypted**: anyone on the same Wi-Fi network can read them.
 - The bot only obeys its owner and the people the owner invited. To hand it over, enter `0` as the

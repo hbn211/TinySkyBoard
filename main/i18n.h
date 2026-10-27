@@ -117,7 +117,7 @@ typedef struct {
     const char *p_sched_long;
     const char *p_nled_day, *p_nled_night, *p_nled_modes[3];   // notification LED: blink, breathe, solid
     const char *p_backup, *p_backup_get, *p_backup_hint, *p_restore, *p_restore_bad, *p_restore_ok;
-    const char *p_sec[5];           // setup page sections: place, display, brightness, rotation, integrations
+    const char *p_sec[6];           // setup page sections: place, display, brightness, rotation, integrations, home network
     const char *p_network;
     const char *p_network_hint;
     const char *p_password;
@@ -155,7 +155,8 @@ typedef struct {
     const char *p_al_silent;
     const char *p_govee_int;
     const char *p_govee_int_hint;
-    const char *p_lan, *p_lan_hint, *p_lan_new;   // pairing code for other panels and the computer (experimental)
+    const char *p_lan_on, *p_lan_off_hint;        // sharing on the home network (experimental), off by default
+    const char *p_lan, *p_lan_hint, *p_lan_new;   // its pairing code, for other panels and the computer
     const char *p_save;
     const char *p_required;
     const char *p_saved_title;

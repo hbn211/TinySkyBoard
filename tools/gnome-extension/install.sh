@@ -69,7 +69,7 @@ install() {
     fi
     while [ -z "$code" ]; do
         [ -t 0 ] || die "no pairing code: ./install.sh XXXX-XXXX"
-        printf 'Pairing code (setup page of the panel, Telegram and sensors): '
+        printf 'Pairing code (setup page of the panel, Computer and other panels): '
         read -r code
     done
     norm=$(normalize_code "$code") || die "\"$code\" isn't a pairing code (8 letters and digits, like K7PM-3QXD)."

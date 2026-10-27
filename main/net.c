@@ -529,9 +529,11 @@ static void net_task(void *arg)
     if (g_cfg.tg_token[0]) {
         telegram_start();
     }
-    char lan_code[16];
-    lan_code_get(lan_code, sizeof(lan_code));
-    lan_start(lan_code);   // panels and mirrors with the same pairing code
+    if (config_get_u8_def("lan_on", 0)) {   // off unless turned on on the setup page
+        char lan_code[16];
+        lan_code_get(lan_code, sizeof(lan_code));
+        lan_start(lan_code);   // panels and mirrors with the same pairing code
+    }
     if (g_cfg.govee_key[0]) {
         govee_start();
     }

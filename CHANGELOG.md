@@ -5,8 +5,9 @@
 - **The panel in the computer's top bar** (experimental): a GNOME Shell extension that mirrors the
   panel on the same Wi-Fi network — weather, sensors, airing-out hint, the latest messages and the
   next schedule. It only listens. Install and uninstall in the README.
-- **Pairing code** on the setup page (*Telegram and sensors*), made by the panel: the computer and other
-  panels need it to hear this panel. "Make a new code" cuts off the ones with the old code.
+- **Share on the home network**, off by default, in a new section of the setup page (*Computer and
+  other panels*). When on, the panel makes a **pairing code** and shows it there: the computer and
+  other panels need it to hear this panel. "Make a new code" cuts off the ones with the old code.
 - Panels with the same code on the same network share messages from Telegram and new schedules.
 - `tools/lan_peer.py` acts as a panel from a computer, for testing.
 

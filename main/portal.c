@@ -793,17 +793,30 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</small>");
     send_alerts(req, L);
     send_compare(req, L);
-    char code[16];
-    lan_code_get(code, sizeof(code));
-    out(req, "<label>");
-    out(req, L->p_lan);
-    out(req, "</label><code style='font-size:1.4em;letter-spacing:.1em'>");
-    out(req, code);
-    out(req, "</code><small>");
-    out(req, L->p_lan_hint);
-    out(req, "</small><label class=chk><input type=checkbox name=lan_new value=1> ");
-    out(req, L->p_lan_new);
+    // sharing on the home network: off unless turned on here; the code exists only once it's on
+    section(req, L, 5);
+    bool lan_on = config_get_u8_def("lan_on", 0);
+    out(req, lan_on ? "<label class=chk><input type=checkbox name=lan_on value=1 checked> "
+                    : "<label class=chk><input type=checkbox name=lan_on value=1> ");
+    out(req, L->p_lan_on);
     out(req, "</label>");
+    if (lan_on) {
+        char code[16];
+        lan_code_get(code, sizeof(code));
+        out(req, "<label>");
+        out(req, L->p_lan);
+        out(req, "</label><code style='font-size:1.4em;letter-spacing:.1em'>");
+        out(req, code);
+        out(req, "</code><small>");
+        out(req, L->p_lan_hint);
+        out(req, "</small><label class=chk><input type=checkbox name=lan_new value=1> ");
+        out(req, L->p_lan_new);
+        out(req, "</label>");
+    } else {
+        out(req, "<small>");
+        out(req, L->p_lan_off_hint);
+        out(req, "</small>");
+    }
     out(req, "</section><button>");
     out(req, L->p_save);
     char footer[96];
@@ -917,6 +930,7 @@ static esp_err_t save_post(httpd_req_t *req)
         g_cfg.tg_owner = 0;   // new bot, new owner
     }
     char lan_new[4];
+    config_set_u8("lan_on", form_value(body, "lan_on", lan_new, sizeof(lan_new)));   // unchecked boxes aren't sent
     if (form_value(body, "lan_new", lan_new, sizeof(lan_new)) && lan_new[0] == '1') {
         lan_code_new();   // the panels and computers with the old one stop hearing this panel
     }
@@ -1274,7 +1288,7 @@ static esp_err_t agenda_post(httpd_req_t *req)
 
 static bool backup_skip(const char *key)
 {
-    static const char *const SKIP[] = {"portal", "alive", "msgs", "unread", "sched_st", "pass", "tg_token", "govee_key"};
+    static const char *const SKIP[] = {"portal", "alive", "msgs", "unread", "sched_st", "pass", "tg_token", "govee_key", "lan_code"};
     for (int i = 0; i < (int)(sizeof(SKIP) / sizeof(SKIP[0])); i++) {
         if (strcmp(key, SKIP[i]) == 0) {
             return true;
