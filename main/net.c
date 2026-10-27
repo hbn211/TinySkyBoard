@@ -529,6 +529,9 @@ static void net_task(void *arg)
     if (g_cfg.tg_token[0]) {
         telegram_start();
     }
+    char lan_code[16];
+    lan_code_get(lan_code, sizeof(lan_code));
+    lan_start(lan_code);   // panels and mirrors with the same pairing code
     if (g_cfg.govee_key[0]) {
         govee_start();
     }

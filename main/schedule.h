@@ -57,6 +57,8 @@ uint32_t msg_take_events(void);          // MSG_EV_*, since the last call
 
 int sched_list(sched_t *out);            // copies the schedules in order; returns how many
 bool sched_add(const sched_t *s);        // false if full
+bool sched_next(char *text, size_t size, time_t *when);   // the soonest one still to start; false if none
+void lan_share_sched(const sched_t *s);  // lan.c: a new schedule to the other panels
 bool sched_update(uint32_t id, const sched_t *s);   // replaces it keeping its id; starts over as new
 bool sched_remove(int index);            // list index (0 = first)
 bool sched_is_active(const sched_t *s, time_t now, time_t *occ);

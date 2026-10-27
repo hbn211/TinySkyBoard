@@ -342,6 +342,58 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
 (day/month in Portuguese and Spanish) and `in 30 min`, and durations like `30 min`, `2 h`,
 `1h30` or `1 day`.
 
+### On the computer (GNOME top bar) — experimental
+
+A GNOME Shell extension shows the panel in the computer's top bar: the weather and temperature, and
+on a click the sensors, the airing-out hint, the latest messages (unread ones marked) and the next
+schedule. It is a **mirror**: it only listens to the panel on the same Wi-Fi network and never sends
+anything to it. It follows the computer's language (English, Portuguese or Spanish). Tested on
+Ubuntu 26.04 (GNOME Shell 50).
+
+**Install**
+
+1. On the panel's setup page, under *Integrations*, copy the **pairing code** (`XXXX-XXXX`).
+2. On the computer, in a terminal, from the folder where you downloaded this repository:
+   ```sh
+   mkdir -p ~/.config/tinyskyboard
+   echo 'XXXX-XXXX' > ~/.config/tinyskyboard/code      # your code
+   chmod 600 ~/.config/tinyskyboard/code
+   mkdir -p ~/.local/share/gnome-shell/extensions
+   ln -s "$PWD/tools/gnome-extension/tinyskyboard@hbn211.github.io" ~/.local/share/gnome-shell/extensions/
+   gnome-extensions enable tinyskyboard@hbn211.github.io
+   ```
+3. Log out and back in (GNOME only finds new extensions at login).
+
+If the computer has a firewall, allow incoming UDP on port 47474 from the home network
+(`sudo ufw allow 47474/udp`).
+
+**What it shows**
+
+| | |
+|---|---|
+| Top bar | Weather icon and temperature; a dot when there are unread messages |
+| `--°` and a crossed-out network icon | Nothing heard from the panel for 90 s (off, another network or another code) |
+| Footer | How many panels it hears |
+
+It updates within 5 s of any change on the panel, and at least every 30 s.
+
+**New code**: tick *Make a new code* on the setup page and save; computers (and other panels) with
+the old one stop receiving. Write the new one to `~/.config/tinyskyboard/code` and log out and back in.
+
+**Uninstall**
+
+```sh
+gnome-extensions disable tinyskyboard@hbn211.github.io                 # leaves the top bar at once
+rm ~/.local/share/gnome-shell/extensions/tinyskyboard@hbn211.github.io  # no "/" at the end
+rm -r ~/.config/tinyskyboard                                           # optional: the code
+```
+
+The second line removes only the link, not the repository's folder; keep it without a `/` at the
+end. To bring it back while it's still installed: `gnome-extensions enable tinyskyboard@hbn211.github.io`.
+
+Panels with the **same pairing code** on the same network also share what arrives through Telegram:
+a message sent to one shows on all of them, and a new schedule is added to all of them.
+
 ## Privacy and security
 
 - **Wi-Fi password, Telegram token and Govee API key** entered on the setup page are stored
@@ -356,6 +408,10 @@ The scheduling assistant understands times like `18:30`, `18h`, `tomorrow 08:00`
   configuration backup) is reachable by anyone on your home network until you close it or after
   10 minutes without use. It never shows the saved Wi-Fi password, bot token or Govee key, and the
   backup file leaves them out.
+- The panel sends its screen (weather, sensors, the latest messages and the next schedule) to the
+  home network every 30 s for the computer extension and the other panels. The packets are
+  **signed** with the pairing code, so nobody without it can make a panel show something, but they
+  are **not encrypted**: anyone on the same Wi-Fi network can read them.
 - The bot only obeys its owner and the people the owner invited. To hand it over, enter `0` as the
   token on the setup page and then the token again: the next chat to talk to it becomes the owner.
 
@@ -369,6 +425,7 @@ main/
   ui.c            dashboard, message screen, setup-mode screen
   net.c           Wi-Fi, NTP, Open-Meteo weather (main and other cities), geocoding, HTTPS helper
   telegram.c      bot: messages, commands, /schedule assistant, uptime notices
+  lan.c           home network: signed UDP broadcasts between panels and to the computer mirror
   govee.c         Govee thermometers: polling in sync with the uploads, trend, day range
   psychro.h       dew point and the airing-out hint (header only)
   schedule.c/.h   active messages and schedules
@@ -384,6 +441,8 @@ main/
 tools/
   govee_probe.py  checks the Govee API from a computer (standard library only)
   gen_emoji.py    builds main/emoji from emoji_list.txt
+  lan_peer.py     acts as a panel from a computer: listen, send messages and schedules, stress test
+  gnome-extension/  the GNOME top-bar mirror (and test_lan.js, its receiver without GNOME Shell)
 flasher/          browser flasher page (ESP Web Tools), published by the release workflow
 .github/workflows release build: firmware files on the release, flasher on GitHub Pages
 partitions.csv    single 3.9 MB app partition

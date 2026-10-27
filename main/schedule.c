@@ -533,6 +533,52 @@ static time_t current_or_next(const sched_t *s, time_t now)
     return 0;
 }
 
+// Next start after now, skipping one the user already skipped; 0 if none in a week
+static time_t next_start(const sched_t *s, time_t skipped, time_t now)
+{
+    if (s->repeat == REPEAT_ONCE) {
+        return s->start > now && s->start != skipped ? s->start : 0;
+    }
+    for (int d = 0; d <= 8; d++) {
+        struct tm t;
+        localtime_r(&now, &t);
+        t.tm_mday += d;
+        t.tm_hour = s->hour;
+        t.tm_min = s->minute;
+        t.tm_sec = 0;
+        t.tm_isdst = -1;
+        time_t o = mktime(&t);
+        bool weekend = t.tm_wday == 0 || t.tm_wday == 6;
+        if ((s->repeat == REPEAT_WEEKDAYS && weekend) || (s->repeat == REPEAT_WEEKENDS && !weekend)) {
+            continue;
+        }
+        if (o > now && o != skipped) {
+            return o;
+        }
+    }
+    return 0;
+}
+
+// Only what is still to start: the ones on now are in the message list (with their read state)
+bool sched_next(char *text, size_t size, time_t *when)
+{
+    time_t now = time(NULL), best = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < SCHED_MAX; i++) {
+        if (!s_sched[i].id) {
+            continue;
+        }
+        time_t o = next_start(&s_sched[i], s_dismissed[i], now);
+        if (o && (!best || o < best)) {
+            best = o;
+            strlcpy(text, s_sched[i].text, size);
+        }
+    }
+    xSemaphoreGive(s_lock);
+    *when = best;
+    return best != 0;
+}
+
 bool sched_skip_today(uint32_t id)
 {
     bool ok = false, once = false;

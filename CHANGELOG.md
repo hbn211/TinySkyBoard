@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **The panel in the computer's top bar** (experimental): a GNOME Shell extension that mirrors the
+  panel on the same Wi-Fi network — weather, sensors, airing-out hint, the latest messages and the
+  next schedule. It only listens. Install and uninstall in the README.
+- **Pairing code** on the setup page (*Integrations*), made by the panel: the computer and other
+  panels need it to hear this panel. "Make a new code" cuts off the ones with the old code.
+- Panels with the same code on the same network share messages from Telegram and new schedules.
+- `tools/lan_peer.py` acts as a panel from a computer, for testing.
+
 ## 1.7.0 — 2026-10-25
 
 - Scheduled messages with ✅ Done in Telegram can go to **everyone on the bot**, not only to whoever

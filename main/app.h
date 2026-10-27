@@ -147,6 +147,12 @@ void telegram_notify_all(const char *text);   // the same, to the owner and the 
 // A reminder with SCHED_F_TG_DONE started (closed = false: send it with a "Done" button), or that
 // occurrence left the screen from the panel (closed = true: the Telegram button says so)
 void telegram_reminder(uint32_t id, int64_t occ, bool closed);
+// lan.c: panels on the same network share messages and new schedules (experimental)
+void lan_start(const char *password);
+void lan_share_msg(const char *from, const char *text);
+int lan_peers(void);
+void lan_code_get(char *out, size_t size);   // pairing code (the LAN password); made on first use
+void lan_code_new(void);   // panels heard in the last 30 s
 // crash.c: after a crash, "reason · task · PC/RA · version" for the power-on notice (once)
 bool crash_take(char *out, size_t size);
 // keeps only what the panel can draw (fonts + color emoji); returns how many characters were dropped

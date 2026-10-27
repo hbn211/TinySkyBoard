@@ -155,6 +155,7 @@ typedef struct {
     const char *p_al_silent;
     const char *p_govee_int;
     const char *p_govee_int_hint;
+    const char *p_lan, *p_lan_hint, *p_lan_new;   // pairing code for other panels and the computer (experimental)
     const char *p_save;
     const char *p_required;
     const char *p_saved_title;

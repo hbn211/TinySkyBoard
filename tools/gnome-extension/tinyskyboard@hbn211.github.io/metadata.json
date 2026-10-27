@@ -1,0 +1,8 @@
+{
+  "uuid": "tinyskyboard@hbn211.github.io",
+  "name": "TinySkyBoard",
+  "description": "Mirror of the TinySkyBoard panels on the network: weather, sensors, messages and the next schedule. Read only.",
+  "shell-version": ["50"],
+  "url": "https://github.com/hbn211/TinySkyBoard",
+  "version": 1
+}

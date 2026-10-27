@@ -864,6 +864,7 @@ static void wizard_finish(int64_t chat_id)
         reply(chat_id, T->sch_full);
         return;
     }
+    lan_share_sched(&s_draft);
     char line[80], out[SCHED_TEXT + 140];
     fmt_entry(&s_draft, line, sizeof(line));
     snprintf(out, sizeof(out), "%s\n%s\n\xE2\x80\x9C%s\xE2\x80\x9D", T->sch_done, line, s_draft.text);
@@ -1170,6 +1171,7 @@ static void handle_message(const cJSON *msg)
         sender_name(msg, from, sizeof(from));
     }
     int n = msg_add_direct(clean, from);
+    lan_share_msg(from, clean);   // other panels on the network show it too
     if (n > 1) {
         char out[96];
         snprintf(out, sizeof(out), T->tg_ok_count_fmt, n);

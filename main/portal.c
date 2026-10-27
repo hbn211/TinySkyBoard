@@ -793,6 +793,17 @@ static esp_err_t root_get(httpd_req_t *req)
     out(req, "</small>");
     send_alerts(req, L);
     send_compare(req, L);
+    char code[16];
+    lan_code_get(code, sizeof(code));
+    out(req, "<label>");
+    out(req, L->p_lan);
+    out(req, "</label><code style='font-size:1.4em;letter-spacing:.1em'>");
+    out(req, code);
+    out(req, "</code><small>");
+    out(req, L->p_lan_hint);
+    out(req, "</small><label class=chk><input type=checkbox name=lan_new value=1> ");
+    out(req, L->p_lan_new);
+    out(req, "</label>");
     out(req, "</section><button>");
     out(req, L->p_save);
     char footer[96];
@@ -904,6 +915,10 @@ static esp_err_t save_post(httpd_req_t *req)
     } else if (tg[0] && strcmp(tg, g_cfg.tg_token) != 0) {
         strlcpy(g_cfg.tg_token, tg, sizeof(g_cfg.tg_token));
         g_cfg.tg_owner = 0;   // new bot, new owner
+    }
+    char lan_new[4];
+    if (form_value(body, "lan_new", lan_new, sizeof(lan_new)) && lan_new[0] == '1') {
+        lan_code_new();   // the panels and computers with the old one stop hearing this panel
     }
     // pasted keys often come with spaces around them
     char *g = govee + strspn(govee, " \t");
@@ -1241,6 +1256,9 @@ static esp_err_t agenda_post(httpd_req_t *req)
             }
         }
         bool ok = id ? sched_update(id, &s) : sched_add(&s);
+        if (ok && !id) {
+            lan_share_sched(&s);
+        }
         if (!ok) {
             return agenda_error(req, L, id ? L->sch_bad_when : L->sch_full);
         }

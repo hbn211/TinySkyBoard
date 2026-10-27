@@ -1,0 +1,28 @@
+/* Colours only for the accents: the rest follows the shell's light or dark style */
+.tsb-panel-temp { padding-left: 4px; }
+.tsb-panel-dot { font-size: 8px; padding-left: 3px; padding-bottom: 6px; }
+.tsb-unread-dot { color: -st-accent-color; }
+
+.tsb-section { min-width: 300px; spacing: 6px; }
+.tsb-wx-icon { padding-right: 12px; }
+.tsb-wx-temp { font-size: 20px; font-weight: bold; }
+.tsb-small { font-size: 12px; }
+.tsb-heading { font-size: 12px; font-weight: bold; }
+
+.tsb-row { spacing: 10px; }
+.tsb-name { font-size: 14px; }
+.tsb-value { font-size: 14px; font-weight: bold; }
+.tsb-rh { font-weight: normal; min-width: 36px; text-align: right; }
+.tsb-trend { font-size: 13px; min-width: 12px; }
+.tsb-warm { color: #ff8a65; }
+.tsb-cool { color: #4fc3f7; }
+.tsb-vent { border-left: 3px solid #2e9d4a; padding-left: 8px; margin-top: 4px; }
+
+.tsb-msg { spacing: 6px; padding-top: 2px; }
+.tsb-msg-dot { font-size: 9px; min-width: 10px; padding-top: 3px; }
+.tsb-from { font-size: 13px; }
+.tsb-bold { font-weight: bold; }
+.tsb-text { font-size: 14px; }
+.tsb-when { font-size: 13px; color: -st-accent-color; }
+.tsb-footer { font-size: 11px; text-align: center; }
+.tsb-vent-no { border-left-color: #e57373; }
